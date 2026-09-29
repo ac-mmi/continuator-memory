@@ -1,0 +1,19 @@
+{
+  "conversation_id": "trip-planning-001",
+  "questions": [
+    {"id": "q001", "question": "What food allergy does Priya have?",
+     "expected_answer": "Shellfish", "expected_message_ids": ["m007"]},
+    {"id": "q002", "question": "Which day is the Sintra day trip planned for?",
+     "expected_answer": "Tuesday May 16", "expected_message_ids": ["m010", "m011"]},
+    {"id": "q003", "question": "What is the flight number of the outbound flight?",
+     "expected_answer": "TP1351", "expected_message_ids": ["m003"]},
+    {"id": "q004", "question": "What is the budget for the week?",
+     "expected_answer": "1800 euros, excluding flights", "expected_message_ids": ["m005"]},
+    {"id": "q005", "question": "Why does the user want to avoid tram 28?",
+     "expected_answer": "They get motion sick easily", "expected_message_ids": ["m013"]},
+    {"id": "q006", "question": "When is the fado evening?",
+     "expected_answer": "Friday May 19", "expected_message_ids": ["m013"]},
+    {"id": "q007", "question": "What time does the return flight leave?",
+     "expected_answer": "18:05 on May 21", "expected_message_ids": ["m017"]}
+  ]
+}
