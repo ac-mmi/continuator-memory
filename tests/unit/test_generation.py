@@ -56,7 +56,7 @@ def test_ollama_request_payload(monkeypatch):
             {"role": "user", "content": "prompt"},
         ],
         "stream": False,
-        "options": {"temperature": 0, "seed": 0},
+        "options": {"temperature": 0, "seed": 0, "num_ctx": 4096},
     }
 
 

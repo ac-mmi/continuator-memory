@@ -38,14 +38,27 @@ def build_prompt(question: str, chunks: list[RetrievedChunk]) -> str:
     return f"Conversation excerpts:\n\n{context}\n\nQuestion: {question}\nAnswer:"
 
 
-class OllamaGenerator:
-    """Calls Ollama's /api/chat with temperature 0 and a fixed seed."""
+# Ollama truncates prompts longer than the context window without raising an error.
+# Measured Phase 3.6 answer prompts: 676-850 tokens, completions at most 48 tokens.
+ANSWER_NUM_CTX = 4096
 
-    def __init__(self, model_name: str, host: str, timeout: float = 300.0, seed: int = 0):
+
+class OllamaGenerator:
+    """Calls Ollama's /api/chat with temperature 0, a fixed seed and an explicit context window."""
+
+    def __init__(
+        self,
+        model_name: str,
+        host: str,
+        timeout: float = 300.0,
+        seed: int = 0,
+        num_ctx: int = ANSWER_NUM_CTX,
+    ):
         self.model_name = model_name
         self.host = host.rstrip("/")
         self.timeout = timeout
         self.seed = seed
+        self.num_ctx = num_ctx
 
     def generate(self, system: str, prompt: str) -> str:
         payload = {
@@ -55,7 +68,7 @@ class OllamaGenerator:
                 {"role": "user", "content": prompt},
             ],
             "stream": False,
-            "options": {"temperature": 0, "seed": self.seed},
+            "options": {"temperature": 0, "seed": self.seed, "num_ctx": self.num_ctx},
         }
         request = urllib.request.Request(
             f"{self.host}/api/chat",

@@ -142,7 +142,9 @@ def test_ollama_json_client_sends_schema(monkeypatch):
     out = OllamaJSONClient("m", "http://h:1/").complete_json("sys", "p", EXTRACTION_SCHEMA)
     assert out == '{"memories": []}'
     assert captured["format"] == EXTRACTION_SCHEMA
-    assert captured["options"] == {"temperature": 0, "seed": 0, "num_predict": 512}
+    assert captured["options"] == {
+        "temperature": 0, "seed": 0, "num_predict": 512, "num_ctx": 4096,
+    }
     assert captured["stream"] is False
 
 

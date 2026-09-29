@@ -82,9 +82,12 @@ def _build_pipeline(store: Store, settings: Settings, memory: bool):
 
 
 def _evaluate(args: argparse.Namespace, settings: Settings) -> int:
+    from continuator_memory import manifest
     from continuator_memory.evaluation.dataset import DatasetError, load_dataset
     from continuator_memory.evaluation.harness import run_evaluation
     from continuator_memory.evaluation.report import write_results
+    from continuator_memory.generation import ANSWER_NUM_CTX
+    from continuator_memory.memory.extraction import EXTRACTION_NUM_CTX
 
     try:
         dataset = load_dataset(args.dataset)
@@ -104,6 +107,18 @@ def _evaluate(args: argparse.Namespace, settings: Settings) -> int:
         }
         if args.memory:
             config["extraction_model"] = settings.extraction_model
+        config["answer_num_ctx"] = ANSWER_NUM_CTX
+        if args.memory:
+            config["extraction_num_ctx"] = EXTRACTION_NUM_CTX
+        observed = manifest.observed(settings)
+        environment = {
+            "packages": observed["packages"],
+            "embedding_revision": observed["embedding_revision"],
+            "ollama_version": observed["ollama_version"],
+            "ollama_model_digest": observed["ollama_model_digest"],
+            "extraction_model_digest": observed["extraction_model_digest"],
+            "matches_v1_manifest": manifest.matches_pinned(observed),
+        }
         results = run_evaluation(
             dataset,
             pipeline,
@@ -112,6 +127,7 @@ def _evaluate(args: argparse.Namespace, settings: Settings) -> int:
             limit=args.limit,
             config=config,
             progress=lambda msg: print(msg, file=sys.stderr),
+            environment=environment,
         )
 
     json_path, md_path = write_results(results, args.output_dir)

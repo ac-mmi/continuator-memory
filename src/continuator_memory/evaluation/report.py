@@ -140,6 +140,10 @@ def render_markdown(results: dict[str, Any]) -> str:
         f"{run['dataset']['n_questions_evaluated']} of {run['dataset']['n_questions_total']}",
         f"- Git commit: `{run['environment']['git_commit']}`; package "
         f"{run['environment']['package_version']}; Python {run['environment']['python']}",
+        f"- Models: embedding revision `{run['environment'].get('embedding_revision')}`; "
+        f"Ollama {run['environment'].get('ollama_version')}; model digest "
+        f"`{run['environment'].get('ollama_model_digest')}`; matches V1 manifest: "
+        f"{run['environment'].get('matches_v1_manifest')}",
         f"- Ingest: {results['timing']['ingest_ms']:.0f} ms; total: "
         f"{results['timing']['total_ms'] / 1000:.1f} s",
         "",

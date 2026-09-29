@@ -433,15 +433,27 @@ class JSONCompletionClient(Protocol):
 # JSON, which parse_extraction rejects as invalid.
 MAX_OUTPUT_TOKENS = 512
 
+# Prompt plus MAX_OUTPUT_TOKENS must fit, or Ollama silently truncates the prompt.
+# Measured Phase 3.6 extraction prompts: 1071-1260 tokens (1772 with the output cap).
+EXTRACTION_NUM_CTX = 4096
+
 
 class OllamaJSONClient:
     """Ollama /api/chat with a JSON schema constraint, temperature 0 and a fixed seed."""
 
-    def __init__(self, model_name: str, host: str, timeout: float = 300.0, seed: int = 0):
+    def __init__(
+        self,
+        model_name: str,
+        host: str,
+        timeout: float = 300.0,
+        seed: int = 0,
+        num_ctx: int = EXTRACTION_NUM_CTX,
+    ):
         self.model_name = model_name
         self.host = host.rstrip("/")
         self.timeout = timeout
         self.seed = seed
+        self.num_ctx = num_ctx
 
     def complete_json(
         self,
@@ -460,7 +472,12 @@ class OllamaJSONClient:
             "messages": messages,
             "stream": False,
             "format": schema,
-            "options": {"temperature": 0, "seed": self.seed, "num_predict": MAX_OUTPUT_TOKENS},
+            "options": {
+                "temperature": 0,
+                "seed": self.seed,
+                "num_predict": MAX_OUTPUT_TOKENS,
+                "num_ctx": self.num_ctx,
+            },
         }
         request = urllib.request.Request(
             f"{self.host}/api/chat",

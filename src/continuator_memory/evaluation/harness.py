@@ -224,6 +224,7 @@ def run_evaluation(
     limit: int | None = None,
     config: dict[str, Any] | None = None,
     progress: Callable[[str], None] | None = None,
+    environment: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Ingest every dataset conversation into ``pipeline`` and score each question.
 
@@ -329,6 +330,7 @@ def run_evaluation(
                 "python": sys.version.split()[0],
                 "platform": platform.platform(),
                 "git_commit": _git_commit(),
+                **(environment or {}),
             },
         },
         "memory": (

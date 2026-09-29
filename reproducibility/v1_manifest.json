@@ -1,0 +1,36 @@
+{
+  "pinned": {
+    "python": "3.12.7",
+    "platform": "macOS-26.3.1-arm64-arm-64bit",
+    "packages": {
+      "numpy": "2.5.3",
+      "sentence-transformers": "6.1.0",
+      "torch": "2.14.0",
+      "transformers": "5.17.0"
+    },
+    "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
+    "embedding_revision": "1110a243fdf4706b3f48f1d95db1a4f5529b4d41",
+    "ollama_version": "0.30.6",
+    "ollama_model": "qwen2.5:1.5b",
+    "ollama_model_digest": "65ec06548149"
+  },
+  "observed": {
+    "python": "3.12.7",
+    "platform": "macOS-26.3.1-arm64-arm-64bit",
+    "packages": {
+      "continuator-memory": "0.1.0",
+      "numpy": "2.5.3",
+      "sentence-transformers": "6.1.0",
+      "torch": "2.14.0",
+      "transformers": "5.17.0"
+    },
+    "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
+    "embedding_revision": "1110a243fdf4706b3f48f1d95db1a4f5529b4d41",
+    "ollama_version": "0.30.6",
+    "ollama_model": "qwen2.5:1.5b",
+    "ollama_model_digest": "65ec06548149b04c096a120e4a6da9d4017ea809c91734ea5631e89f96ddc57b",
+    "extraction_model": "qwen2.5:1.5b",
+    "extraction_model_digest": "65ec06548149b04c096a120e4a6da9d4017ea809c91734ea5631e89f96ddc57b"
+  },
+  "matches_pinned": true
+}

@@ -155,6 +155,17 @@ def test_generation_errors_are_recorded_not_raised():
     assert res["aggregate"]["answer"]["overall"]["n_errors"] == 1
 
 
+def test_environment_metadata_is_recorded_without_changing_scores():
+    base = run_evaluation(DATASET, FakePipeline(), generation_top_k=5)
+    extra = {"embedding_revision": "rev", "ollama_version": "0.30.6"}
+    res = run_evaluation(DATASET, FakePipeline(), generation_top_k=5, environment=extra)
+    env = res["run"]["environment"]
+    assert env["embedding_revision"] == "rev" and env["ollama_version"] == "0.30.6"
+    assert env["git_commit"] == base["run"]["environment"]["git_commit"]
+    assert res["aggregate"] == base["aggregate"]
+    assert "embedding revision `rev`" in render_markdown(res)
+
+
 def test_retrieval_only_and_limit():
     pipeline = FakePipeline()
     res = run_evaluation(DATASET, pipeline, generation_top_k=5, retrieval_only=True, limit=2)
