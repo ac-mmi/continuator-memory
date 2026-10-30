@@ -93,49 +93,59 @@ class Store:
 
         An existing conversation with the same ID is replaced.
         """
+        with self._conn:
+            self.write_conversation(conversation, chunks, embeddings, model_name)
+
+    def write_conversation(
+        self,
+        conversation: Conversation,
+        chunks: list[Chunk],
+        embeddings: np.ndarray,
+        model_name: str,
+    ) -> None:
+        """``save_conversation`` inside the caller's open transaction; does not commit."""
         if embeddings.shape[0] != len(chunks):
             raise ValueError("embeddings must have one row per chunk")
         vectors = np.ascontiguousarray(embeddings, dtype=np.float32)
         cid = conversation.conversation_id
-        with self._conn:
-            self._conn.execute("DELETE FROM conversations WHERE conversation_id = ?", (cid,))
+        self._conn.execute("DELETE FROM conversations WHERE conversation_id = ?", (cid,))
+        self._conn.execute(
+            "INSERT INTO conversations (conversation_id, title) VALUES (?, ?)",
+            (cid, conversation.title),
+        )
+        self._conn.executemany(
+            "INSERT INTO messages (message_id, conversation_id, position, role, content, "
+            "timestamp) VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                (m.message_id, cid, m.position, m.role, m.content, m.timestamp)
+                for m in conversation.messages
+            ],
+        )
+        for chunk, vector in zip(chunks, vectors):
             self._conn.execute(
-                "INSERT INTO conversations (conversation_id, title) VALUES (?, ?)",
-                (cid, conversation.title),
+                "INSERT INTO chunks (chunk_id, conversation_id, position, text, metadata_json) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    chunk.chunk_id,
+                    chunk.conversation_id,
+                    chunk.position,
+                    chunk.text,
+                    json.dumps(chunk.metadata, sort_keys=True),
+                ),
             )
             self._conn.executemany(
-                "INSERT INTO messages (message_id, conversation_id, position, role, content, "
-                "timestamp) VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO chunk_messages (chunk_id, conversation_id, message_id, position) "
+                "VALUES (?, ?, ?, ?)",
                 [
-                    (m.message_id, cid, m.position, m.role, m.content, m.timestamp)
-                    for m in conversation.messages
+                    (chunk.chunk_id, chunk.conversation_id, mid, i)
+                    for i, mid in enumerate(chunk.source_message_ids)
                 ],
             )
-            for chunk, vector in zip(chunks, vectors):
-                self._conn.execute(
-                    "INSERT INTO chunks (chunk_id, conversation_id, position, text, metadata_json) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (
-                        chunk.chunk_id,
-                        chunk.conversation_id,
-                        chunk.position,
-                        chunk.text,
-                        json.dumps(chunk.metadata, sort_keys=True),
-                    ),
-                )
-                self._conn.executemany(
-                    "INSERT INTO chunk_messages (chunk_id, conversation_id, message_id, position) "
-                    "VALUES (?, ?, ?, ?)",
-                    [
-                        (chunk.chunk_id, chunk.conversation_id, mid, i)
-                        for i, mid in enumerate(chunk.source_message_ids)
-                    ],
-                )
-                self._conn.execute(
-                    "INSERT INTO chunk_embeddings (chunk_id, model_name, dim, vector) "
-                    "VALUES (?, ?, ?, ?)",
-                    (chunk.chunk_id, model_name, vector.shape[0], vector.tobytes()),
-                )
+            self._conn.execute(
+                "INSERT INTO chunk_embeddings (chunk_id, model_name, dim, vector) "
+                "VALUES (?, ?, ?, ?)",
+                (chunk.chunk_id, model_name, vector.shape[0], vector.tobytes()),
+            )
 
     # ---- reads ------------------------------------------------------------
 

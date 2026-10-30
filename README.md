@@ -124,6 +124,60 @@ continuator-memory ask "When is the Sintra trip?" -k 3 --json
 Leaving out `-c/--conversation` searches every ingested conversation.
 `python -m continuator_memory ...` works the same way.
 
+### Memory extraction (opt-in)
+
+Imports default to `extract="messages"`, one stored record per message with no
+model call. `extract="memories"` is opt-in, available through `POST /import` and
+`ingest_imported`. It is English-only.
+
+Enforced by code:
+
+- Each memory cites its own source message, speaker label, role and timestamp.
+- A claim whose content stems are not in its source is rejected, and so is a
+  claim that cannot be compared (no source tokens, or text outside Latin script).
+- Memories are superseded only by an explicit relation or an identity-safe slot
+  match, and old versions are kept.
+- Re-import over stored memories is failure-safe. Nothing is written until
+  extraction finishes, and the replacement is one transaction. A run with a
+  failed window, or with no memories because output was rejected or missing,
+  keeps the stored conversation and memories.
+
+Requested of the model in the prompt, and not enforced by code: durability
+selection, not turning assistant suggestions into user facts, and keeping
+hypotheticals and negation intact.
+
+Known limits:
+
+- Durability is not enforced, so temporary events and small talk may be stored
+  as current memories.
+- Source validation compares word stems, not meaning. It cannot guarantee
+  entailment: it rejects many faithful paraphrases and does not detect a flipped
+  negation or a changed speaker.
+- Unsupported inferred details can pass validation, including gendered pronouns
+  the speaker never used, because pronouns are stopwords.
+- Temporal status comes from keywords and can be wrong.
+- Subject names are not normalized ("Sam" and "the user" stay separate), and a
+  correction can only link to one of the last 20 claims. A correction split into
+  several memories may link only one of them to the old fact.
+- Validator rejections from a run that still produces memories are not failures,
+  so a re-import can store fewer memories. A run where the model reports nothing
+  durable in every message counts as successful and replaces stored memories.
+
+- Headerless transcript parsing is best-effort and can misattribute speakers.
+  For example, with only single blank lines between paragraphs, an uppercase user
+  paragraph can merge into the assistant turn, so its facts carry the assistant
+  role. Use explicit speaker headers (`You:` and `ChatGPT:`) or JSON when speaker
+  attribution matters.
+
+The heuristic evidence evaluator in `webapi/evidence_eval.py` contains
+benchmark-specific logic for the names Caroline and Melanie, the speakers of
+LoCoMo conv-26, so its results can change with the name. It is diagnostic-only:
+`iterative_diag` and `ranking_diag` use it, and normal API answer generation does
+not.
+
+See `reports/memory_extraction_v1.md` (§9 smoke test, §10 limitations) and
+`reports/memory_extraction_heuristic_audit.md`.
+
 ### Configuration
 
 | Environment variable | Default |

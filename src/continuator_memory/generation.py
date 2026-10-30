@@ -41,6 +41,8 @@ def build_prompt(question: str, chunks: list[RetrievedChunk]) -> str:
 # Ollama truncates prompts longer than the context window without raising an error.
 # Measured Phase 3.6 answer prompts: 676-850 tokens, completions at most 48 tokens.
 ANSWER_NUM_CTX = 4096
+_USAGE_KEYS = ("prompt_eval_count", "eval_count", "done_reason", "total_duration",
+               "load_duration", "prompt_eval_duration", "eval_duration")
 
 
 class OllamaGenerator:
@@ -59,8 +61,24 @@ class OllamaGenerator:
         self.timeout = timeout
         self.seed = seed
         self.num_ctx = num_ctx
+        # Token counts Ollama reported for the most recent successful call (diagnostics only).
+        self.last_usage: dict | None = None
 
-    def generate(self, system: str, prompt: str) -> str:
+    def generate(
+        self,
+        system: str,
+        prompt: str,
+        *,
+        temperature: float | None = None,
+        num_predict: int | None = None,
+    ) -> str:
+        options: dict = {
+            "temperature": 0.0 if temperature is None else temperature,
+            "seed": self.seed,
+            "num_ctx": self.num_ctx,
+        }
+        if num_predict is not None:
+            options["num_predict"] = num_predict
         payload = {
             "model": self.model_name,
             "messages": [
@@ -68,7 +86,7 @@ class OllamaGenerator:
                 {"role": "user", "content": prompt},
             ],
             "stream": False,
-            "options": {"temperature": 0, "seed": self.seed, "num_ctx": self.num_ctx},
+            "options": options,
         }
         request = urllib.request.Request(
             f"{self.host}/api/chat",
@@ -87,6 +105,12 @@ class OllamaGenerator:
                 f"could not reach Ollama at {self.host} ({exc.reason}); is `ollama serve` running?"
             ) from exc
         try:
-            return body["message"]["content"].strip()
+            text = body["message"]["content"].strip()
         except (KeyError, TypeError) as exc:
             raise GenerationError(f"unexpected Ollama response: {body!r}") from exc
+        self.last_usage = {
+            "num_ctx": self.num_ctx,
+            "num_predict": num_predict,
+            **{key: body[key] for key in _USAGE_KEYS if key in body},
+        }
+        return text

@@ -7,6 +7,7 @@ import json
 import sys
 
 from continuator_memory.config import Settings
+from continuator_memory.envfile import load_root_env
 from continuator_memory.generation import GenerationError, OllamaGenerator
 from continuator_memory.models import ParseError, RetrievedChunk, load_conversation
 from continuator_memory.pipeline import Pipeline
@@ -62,6 +63,21 @@ def _build_parser(settings: Settings) -> argparse.ArgumentParser:
     p_mem.add_argument("-c", "--conversation", help="restrict to one conversation ID")
     p_mem.add_argument("--current-only", action="store_true", help="hide superseded records")
     p_mem.add_argument("--json", action="store_true", help="emit JSON")
+
+    p_serve = sub.add_parser(
+        "serve", help="HTTP API for the web UI (no extraction; default sample fixture)"
+    )
+    p_serve.add_argument("--host", default="127.0.0.1")
+    p_serve.add_argument("--port", type=int, default=8765)
+    p_serve.add_argument(
+        "--sample",
+        choices=("fixture", "db"),
+        default="fixture",
+        help="fixture = built-in 6-message sample; db = existing SQLite",
+    )
+    p_serve.add_argument("--classifications", help="B′ classifications JSONL (needed for db + B′)")
+    p_serve.add_argument("-c", "--conversation", help="SQLite conversation id when --sample db")
+    p_serve.add_argument("-k", "--top-k", type=int, help="retrieval cutoff (fixture default: 1)")
     return parser
 
 
@@ -195,6 +211,7 @@ def _print_chunks(chunks: list[RetrievedChunk]) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    load_root_env()
     settings = Settings.from_env()
     args = _build_parser(settings).parse_args(argv)
 
@@ -202,6 +219,19 @@ def main(argv: list[str] | None = None) -> int:
         return _evaluate(args, settings)
     if args.command == "memories":
         return _memories(args)
+    if args.command == "serve":
+        from continuator_memory.webapi.server import serve_from_env
+
+        serve_from_env(
+            host=args.host,
+            port=args.port,
+            sample=args.sample,
+            db=args.db,
+            classifications=args.classifications,
+            conversation_id=args.conversation,
+            k=args.top_k,
+        )
+        return 0
 
     with Store(args.db) as store:
         pipeline = _build_pipeline(store, settings, args.memory)
