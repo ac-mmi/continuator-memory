@@ -17,7 +17,7 @@ from continuator_memory.webapi.workspace import Workspace
 from tests.helpers import HashingEmbedder
 from tests.unit.test_webapi import FERRY_TRANSCRIPT
 
-M43C_CORPUS = Path("results/publish/smoke/m4_3c_document_evidence/corpus")
+M43C_CORPUS = Path("tests/fixtures/m4_3c_document_evidence")
 M43C_Q13 = "What is the quantum entanglement coffee brewing recipe?"
 
 
