@@ -20,12 +20,6 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
-
-[project.urls]
-Homepage = "https://github.com/ac-mmi/continuator-memory"
-Repository = "https://github.com/ac-mmi/continuator-memory"
-Issues = "https://github.com/ac-mmi/continuator-memory/issues"
-Documentation = "https://github.com/ac-mmi/continuator-memory#quickstart-5-minutes"
 # Default install stays "works for /context" out of the box. sentence-transformers
 # (and its torch stack) is required for memory retrieval embeddings; document BM25
 # ingest/search does not need it, but splitting an [embeddings] extra would make the
@@ -37,6 +31,12 @@ dependencies = [
     "python-docx>=1.1",
     "sentence-transformers>=3.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/ac-mmi/continuator-memory"
+Repository = "https://github.com/ac-mmi/continuator-memory"
+Issues = "https://github.com/ac-mmi/continuator-memory/issues"
+Documentation = "https://github.com/ac-mmi/continuator-memory#quickstart-5-minutes"
 
 [project.optional-dependencies]
 dev = [
