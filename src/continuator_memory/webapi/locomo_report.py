@@ -30,8 +30,36 @@ from continuator_memory.webapi.answering import (
 )
 from continuator_memory.webapi.iterative import retrieve_iterative_evidence
 from continuator_memory.webapi.iterative_diag import DEFAULT_DB, DEFAULT_LOCOMO
+from continuator_memory.webapi.contextual_bm25 import (
+    MODE_CONTEXTUAL_BM25,
+    build_contextual_bm25_index,
+    retrieve_contextual_bm25_evidence,
+)
+from continuator_memory.webapi.contextual_rerank import MODE_CONTEXTUAL_LEXICAL_RERANK
+from continuator_memory.webapi.contextual_union_rerank import (
+    DEFAULT_CHANNEL_TOP_N,
+    MODE_CONTEXTUAL_UNION_RERANK,
+    retrieve_contextual_union_rerank_evidence,
+)
+from continuator_memory.webapi.contextual_wide_union_rerank import (
+    DEFAULT_QUOTA_PER_CHANNEL,
+    DEFAULT_REDUCED_TOP_N,
+    DEFAULT_WIDE_CHANNEL_TOP_N,
+    DEFAULT_WIDE_RRF_C,
+    MODE_TO_REDUCER,
+    WIDE_UNION_RERANK_MODES,
+    retrieve_for_mode as retrieve_contextual_wide_union_for_mode,
+)
+from continuator_memory.webapi.hybrid_rrf import HYBRID_RRF_MODES, retrieve_hybrid_rrf_evidence
 from continuator_memory.webapi.multiquery import build_memory_retriever, load_original_weight, retrieve_multiquery_evidence
-from continuator_memory.webapi.workspace import RETRIEVAL_MODES, Workspace
+from continuator_memory.webapi.workspace import CONTEXTUAL_ENRICHMENT_MODES, RETRIEVAL_MODES, Workspace
+from continuator_memory.v2.rerank import (
+    RerankerLoadError,
+    load_cross_encoder_reranker,
+    load_rerank_model_name,
+    load_reranker_label,
+    rerank as cross_encoder_rerank,
+)
 from continuator_memory.v2.graph_index import GraphIndex
 
 from continuator_memory.v2.bprime_links import BPrimeConfig
@@ -71,6 +99,9 @@ class LocomoQuestion:
     adversarial_answer: Any = None
     # Evaluation-only. None means: LoCoMo category 5 expects an abstention.
     expects_abstention: bool | None = None
+    # Given to the answerer. The date the question is asked, from the dataset (LongMemEval's
+    # ``question_date``); None (LoCoMo) leaves the prompt without a current date.
+    question_date: str | None = None
 
     @property
     def abstention_expected(self) -> bool:
@@ -218,13 +249,33 @@ def _mean(values: list[float]) -> float:
 
 # Experimental graph retrieval (evaluation harness only; the web workspace modes are unchanged).
 GRAPH_MODES = frozenset({"graph", "graph_hybrid"})
-EVAL_RETRIEVAL_MODES = RETRIEVAL_MODES | GRAPH_MODES
+# ``hybrid`` remains a CLI alias of product mode ``lexical`` (semantic + lexical weight).
+EVAL_RETRIEVAL_MODES = RETRIEVAL_MODES | GRAPH_MODES | frozenset({"hybrid"})
 GRAPH_RRF_C = 60  # standard reciprocal-rank-fusion constant; not tuned
+RERANK_UNSUPPORTED_MODES = (
+    frozenset({"multiquery", "iterative", "bprime", MODE_CONTEXTUAL_BM25})
+    | GRAPH_MODES
+    | HYBRID_RRF_MODES
+)
 
 
 def retrieval_config(mode: str) -> RetrievalConfig | None:
-    # The graph modes reuse the unchanged hybrid configuration for their baseline ranking.
-    if mode == "hybrid" or mode in GRAPH_MODES:
+    # lexical / hybrid / graph modes share the lexical-enhanced memory ranking config.
+    # Hybrid RRF modes build channel-specific configs internally.
+    # contextual_lexical / contextual_lexical_rerank use the same lexical_weight as lexical
+    # but force context_weight=0 (Option B enriched indexed text; do not mix with dual-vector
+    # turn_context).
+    if mode in HYBRID_RRF_MODES:
+        return RetrievalConfig()
+    if mode == MODE_CONTEXTUAL_BM25:
+        # Sparse BM25 does not use dense RetrievalConfig / lexical_weight.
+        return None
+    if mode == MODE_CONTEXTUAL_UNION_RERANK or mode in WIDE_UNION_RERANK_MODES:
+        # Dense channel uses the same lexical config as contextual_lexical.
+        return RetrievalConfig(lexical_weight=load_lexical_weight(), context_weight=0.0)
+    if mode in CONTEXTUAL_ENRICHMENT_MODES:
+        return RetrievalConfig(lexical_weight=load_lexical_weight(), context_weight=0.0)
+    if mode in ("hybrid", "lexical") or mode in GRAPH_MODES:
         return RetrievalConfig(lexical_weight=load_lexical_weight(), context_weight=load_context_weight())
     return RetrievalConfig()
 
@@ -325,12 +376,146 @@ def _graph_retrieve(workspace: Workspace, question: str, mode: str, *, depth: in
 
 def _retrieve(workspace: Workspace, question: str, mode: str, *, depth: int, top_k: int):
     extra: dict[str, Any] = {}
+    reranker = getattr(workspace, "_eval_reranker", None)
+    if mode == MODE_CONTEXTUAL_UNION_RERANK:
+        scorer = reranker
+        if scorer is None:
+            raise ValueError(
+                "contextual_union_rerank requires a loaded cross-encoder "
+                f"(set CONTINUATOR_RERANK_MODEL or cache {load_rerank_model_name()!r})"
+            )
+        index = getattr(workspace, "_eval_bm25_index", None)
+        consolidator = workspace.consolidator
+        if index is None:
+            index, consolidator = build_contextual_bm25_index(
+                workspace.conversation,
+                workspace.claims,
+                workspace.relations,
+                consolidator=consolidator,
+            )
+            workspace._eval_bm25_index = index
+        # Fixed per-channel protocol depth (default 50); do not truncate union before CE.
+        evidence, meta = retrieve_contextual_union_rerank_evidence(
+            question,
+            workspace.conversation,
+            workspace.claims,
+            workspace.relations,
+            workspace.embedder(),
+            workspace.budget_chars,
+            consolidator=consolidator,
+            scorer=scorer,
+            channel_top_n=DEFAULT_CHANNEL_TOP_N,
+            bm25_index=index,
+        )
+        cut = evidence_for_generation(
+            question, workspace.conversation, evidence.outcome, k=top_k,
+            budget_chars=workspace.budget_chars,
+        )
+        extra["rankedMessageIds"] = ranked_message_ids(evidence.outcome.results)
+        extra["retrievedMemories"] = _memory_rows(evidence.outcome.results)
+        extra["fullOutcome"] = evidence.outcome
+        extra["trace"] = meta
+        return cut, extra
+    if mode in WIDE_UNION_RERANK_MODES:
+        scorer = reranker
+        if scorer is None:
+            raise ValueError(
+                f"{mode} requires a loaded cross-encoder "
+                f"(set CONTINUATOR_RERANK_MODEL or cache {load_rerank_model_name()!r})"
+            )
+        index = getattr(workspace, "_eval_bm25_index", None)
+        consolidator = workspace.consolidator
+        if index is None:
+            index, consolidator = build_contextual_bm25_index(
+                workspace.conversation,
+                workspace.claims,
+                workspace.relations,
+                consolidator=consolidator,
+            )
+            workspace._eval_bm25_index = index
+        evidence, meta = retrieve_contextual_wide_union_for_mode(
+            mode,
+            question,
+            workspace.conversation,
+            workspace.claims,
+            workspace.relations,
+            workspace.embedder(),
+            workspace.budget_chars,
+            consolidator=consolidator,
+            scorer=scorer,
+            channel_top_n=DEFAULT_WIDE_CHANNEL_TOP_N,
+            reduced_top_n=DEFAULT_REDUCED_TOP_N,
+            rrf_c=DEFAULT_WIDE_RRF_C,
+            quota_per_channel=DEFAULT_QUOTA_PER_CHANNEL,
+            bm25_index=index,
+        )
+        cut = evidence_for_generation(
+            question, workspace.conversation, evidence.outcome, k=top_k,
+            budget_chars=workspace.budget_chars,
+        )
+        extra["rankedMessageIds"] = ranked_message_ids(evidence.outcome.results)
+        extra["retrievedMemories"] = _memory_rows(evidence.outcome.results)
+        extra["fullOutcome"] = evidence.outcome
+        extra["trace"] = meta
+        return cut, extra
+    if reranker is not None and (mode in RERANK_UNSUPPORTED_MODES
+                                 or getattr(workspace, "_eval_retriever", None) is None):
+        raise ValueError(f"cross-encoder reranking needs the evaluation retriever and is not wired for {mode!r}")
+    if mode == MODE_CONTEXTUAL_BM25:
+        index = getattr(workspace, "_eval_bm25_index", None)
+        consolidator = workspace.consolidator
+        if index is None:
+            index, consolidator = build_contextual_bm25_index(
+                workspace.conversation,
+                workspace.claims,
+                workspace.relations,
+                consolidator=consolidator,
+            )
+            workspace._eval_bm25_index = index
+        evidence, meta = retrieve_contextual_bm25_evidence(
+            question,
+            workspace.conversation,
+            workspace.claims,
+            workspace.relations,
+            depth,
+            workspace.budget_chars,
+            consolidator=consolidator,
+            index=index,
+        )
+        # Answer context uses top_k; ranking metrics use the full depth outcome.
+        cut = evidence_for_generation(
+            question, workspace.conversation, evidence.outcome, k=top_k,
+            budget_chars=workspace.budget_chars,
+        )
+        extra["rankedMessageIds"] = ranked_message_ids(evidence.outcome.results)
+        extra["retrievedMemories"] = _memory_rows(evidence.outcome.results)
+        extra["fullOutcome"] = evidence.outcome
+        extra["trace"] = meta
+        return cut, extra
     if mode == "multiquery":
         evidence, extra = retrieve_multiquery_evidence(
             question, workspace.conversation, workspace.claims, workspace.relations,
             workspace.embedder(), top_k, workspace.budget_chars,
             planner=workspace._resolve_planner(load_generation_settings()),
             original_weight=load_original_weight(),
+            depth=depth,
+        )
+        return evidence, extra
+    if mode in HYBRID_RRF_MODES:
+        hybrid_kwargs: dict[str, Any] = {"depth": depth}
+        if mode == "lexical_multiquery_rrf":
+            hybrid_kwargs["planner"] = workspace._resolve_planner(load_generation_settings())
+            hybrid_kwargs["original_weight"] = load_original_weight()
+        evidence, extra = retrieve_hybrid_rrf_evidence(
+            mode,
+            question,
+            workspace.conversation,
+            workspace.claims,
+            workspace.relations,
+            workspace.embedder(),
+            top_k,
+            workspace.budget_chars,
+            **hybrid_kwargs,
         )
         return evidence, extra
     if mode == "iterative":
@@ -340,6 +525,7 @@ def _retrieve(workspace: Workspace, question: str, mode: str, *, depth: int, top
             planner=workspace._resolve_planner(load_generation_settings()),
             evaluator=workspace._resolve_evaluator(load_generation_settings()),
             original_weight=load_original_weight(),
+            depth=depth,
         )
         return evidence, extra
     if mode in GRAPH_MODES:
@@ -358,10 +544,60 @@ def _retrieve(workspace: Workspace, question: str, mode: str, *, depth: int, top
             question, workspace.conversation, workspace.claims, workspace.relations,
             workspace.embedder(), depth, workspace.budget_chars,
             config=retrieval_config(mode), bprime=bprime,
+            contextual_enrichment=(mode in CONTEXTUAL_ENRICHMENT_MODES),
         )
+        if mode == MODE_CONTEXTUAL_LEXICAL_RERANK:
+            scorer = reranker
+            if scorer is None:
+                raise ValueError(
+                    "contextual_lexical_rerank requires a loaded cross-encoder "
+                    f"(set CONTINUATOR_RERANK_MODEL or cache {load_rerank_model_name()!r})"
+                )
+            outcome, scores = cross_encoder_rerank(
+                question, evidence.outcome, workspace.conversation, scorer,
+                passage_source="retrieval_content",
+            )
+            evidence = evidence_for_generation(
+                question, workspace.conversation, outcome, k=top_k,
+                budget_chars=workspace.budget_chars,
+            )
+            extra["rankedMessageIds"] = ranked_message_ids(outcome.results)
+            extra["retrievedMemories"] = _memory_rows(outcome.results)
+            extra["fullOutcome"] = outcome
+            meta = scorer.metadata() if hasattr(scorer, "metadata") else {"model": "custom"}
+            extra["trace"] = {"rerank": {**meta, "candidatePool": len(scores), "topK": top_k,
+                                         "passageSource": "retrieval_content", "scores": scores}}
+            return evidence, extra
         return evidence, extra
     retriever.config = retrieval_config(mode) or RetrievalConfig()
     outcome = retriever.search(question, depth, workspace.conversation.conversation_id)
+    if mode == MODE_CONTEXTUAL_LEXICAL_RERANK:
+        scorer = reranker
+        if scorer is None:
+            raise ValueError(
+                "contextual_lexical_rerank requires a loaded cross-encoder "
+                f"(set CONTINUATOR_RERANK_MODEL or cache {load_rerank_model_name()!r})"
+            )
+        outcome, scores = cross_encoder_rerank(
+            question, outcome, workspace.conversation, scorer,
+            passage_source="retrieval_content",
+        )
+        extra["trace"] = {
+            "rerank": {
+                **(scorer.metadata() if hasattr(scorer, "metadata") else {"model": "custom"}),
+                "candidatePool": len(scores),
+                "topK": top_k,
+                "passageSource": "retrieval_content",
+                "scores": scores,
+            }
+        }
+    elif reranker is not None:
+        # Optional harness attachment: reorder the same pool using source-message text.
+        outcome, scores = cross_encoder_rerank(
+            question, outcome, workspace.conversation, reranker,
+        )
+        extra["trace"] = {"rerank": {**reranker.metadata(), "candidatePool": len(scores),
+                                     "topK": top_k, "scores": scores}}
     evidence = evidence_for_generation(
         question, workspace.conversation, outcome, k=top_k, budget_chars=workspace.budget_chars,
     )
@@ -531,6 +767,7 @@ def evaluate_question(
             max_context_chars=settings.max_context_chars,
             context_tokens=settings.num_ctx,
             output_tokens=settings.num_predict,
+            question_date=item.question_date,
         )
         generation_ms = None
         if generate:
@@ -621,6 +858,8 @@ def question_record(
         "questionId": row["questionId"],
         "questionType": row.get("category"),
         "condition": row.get("condition"),
+        "rerankerModel": run.get("rerankerModel") or run.get("rerankModel"),
+        "rerankerLabel": run.get("rerankerLabel"),
         "question": row.get("question"),
         "rawAnswer": row.get("rawAnswer"),
         "finalAnswer": row.get("generatedAnswer"),
@@ -931,18 +1170,51 @@ def run_evaluation(
     records = load_locomo_records(dataset)
     record = select_record(records, sample_id=sample_id, index=conversation_index)
     owned = workspace
+    contextual_enrichment = retrieval_mode in CONTEXTUAL_ENRICHMENT_MODES
     if workspace is None:
         workspace = Workspace.from_sqlite(db, conversation_id=conversation_id, k=min(top_k, MAX_ANSWER_TOP_K))
-        workspace._eval_retriever = build_memory_retriever(
-            workspace.conversation, workspace.claims, workspace.relations,
-            workspace.embedder(), retrieval_config(retrieval_mode),
-        )
-    else:
+    if retrieval_mode == MODE_CONTEXTUAL_BM25:
+        # Sparse path: no dense embedding index. Cache BM25 over contextual units only.
+        if getattr(workspace, "_eval_bm25_index", None) is None:
+            workspace._eval_bm25_index, _ = build_contextual_bm25_index(
+                workspace.conversation,
+                workspace.claims,
+                workspace.relations,
+                consolidator=workspace.consolidator,
+            )
+    elif retrieval_mode == MODE_CONTEXTUAL_UNION_RERANK or retrieval_mode in WIDE_UNION_RERANK_MODES:
+        # Dense contextual channel + BM25 channel + cross-encoder.
         if getattr(workspace, "_eval_retriever", None) is None:
             workspace._eval_retriever = build_memory_retriever(
                 workspace.conversation, workspace.claims, workspace.relations,
                 workspace.embedder(), retrieval_config(retrieval_mode),
+                contextual_enrichment=True,
             )
+        if getattr(workspace, "_eval_bm25_index", None) is None:
+            workspace._eval_bm25_index, _ = build_contextual_bm25_index(
+                workspace.conversation,
+                workspace.claims,
+                workspace.relations,
+                consolidator=workspace.consolidator,
+            )
+    elif getattr(workspace, "_eval_retriever", None) is None:
+        workspace._eval_retriever = build_memory_retriever(
+            workspace.conversation, workspace.claims, workspace.relations,
+            workspace.embedder(), retrieval_config(retrieval_mode),
+            contextual_enrichment=contextual_enrichment and retrieval_mode != MODE_CONTEXTUAL_BM25,
+        )
+    if (
+        retrieval_mode in {
+            MODE_CONTEXTUAL_LEXICAL_RERANK,
+            MODE_CONTEXTUAL_UNION_RERANK,
+            *WIDE_UNION_RERANK_MODES,
+        }
+        and getattr(workspace, "_eval_reranker", None) is None
+    ):
+        try:
+            workspace._eval_reranker = load_cross_encoder_reranker()
+        except RerankerLoadError as exc:
+            raise SystemExit(str(exc)) from exc
     message_ids = {message.message_id for message in workspace.conversation.messages}
     items = load_locomo_questions(record, message_ids)
     if limit is not None:
@@ -966,8 +1238,62 @@ def run_evaluation(
         "condition": condition,
         "topK": top_k,
         "depth": depth,
-        "lexicalWeight": load_lexical_weight() if retrieval_mode == "hybrid" or retrieval_mode in GRAPH_MODES else 0.0,
-        "contextWeight": load_context_weight() if retrieval_mode == "hybrid" or retrieval_mode in GRAPH_MODES else 0.0,
+        "lexicalWeight": load_lexical_weight()
+        if retrieval_mode in (
+            "hybrid", "lexical", "contextual_lexical",
+            MODE_CONTEXTUAL_LEXICAL_RERANK, MODE_CONTEXTUAL_UNION_RERANK,
+            *WIDE_UNION_RERANK_MODES,
+        )
+        or retrieval_mode in GRAPH_MODES
+        or retrieval_mode in HYBRID_RRF_MODES
+        else 0.0,
+        "contextWeight": (
+            0.0
+            if retrieval_mode in CONTEXTUAL_ENRICHMENT_MODES
+            else load_context_weight()
+            if retrieval_mode in ("hybrid", "lexical") or retrieval_mode in GRAPH_MODES
+            else 0.0
+        ),
+        "rerankModel": (
+            load_rerank_model_name()
+            if retrieval_mode in {
+                MODE_CONTEXTUAL_LEXICAL_RERANK,
+                MODE_CONTEXTUAL_UNION_RERANK,
+                *WIDE_UNION_RERANK_MODES,
+            }
+            else None
+        ),
+        "rerankerModel": (
+            load_rerank_model_name()
+            if retrieval_mode in {
+                MODE_CONTEXTUAL_LEXICAL_RERANK,
+                MODE_CONTEXTUAL_UNION_RERANK,
+                *WIDE_UNION_RERANK_MODES,
+            }
+            else None
+        ),
+        "rerankerLabel": (
+            load_reranker_label()
+            if retrieval_mode in {
+                MODE_CONTEXTUAL_LEXICAL_RERANK,
+                MODE_CONTEXTUAL_UNION_RERANK,
+                *WIDE_UNION_RERANK_MODES,
+            }
+            else None
+        ),
+        "unionChannelTopN": (
+            DEFAULT_CHANNEL_TOP_N if retrieval_mode == MODE_CONTEXTUAL_UNION_RERANK
+            else DEFAULT_WIDE_CHANNEL_TOP_N if retrieval_mode in WIDE_UNION_RERANK_MODES
+            else None
+        ),
+        "wideUnionReducer": (
+            MODE_TO_REDUCER[retrieval_mode] if retrieval_mode in WIDE_UNION_RERANK_MODES else None
+        ),
+        "wideUnionReducedTopN": (
+            None if retrieval_mode not in WIDE_UNION_RERANK_MODES
+            else None if MODE_TO_REDUCER[retrieval_mode] == "none"
+            else DEFAULT_REDUCED_TOP_N
+        ),
         "generation": settings.public_dict(),
         "questions": rows,
         "summary": aggregate(rows),

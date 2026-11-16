@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -59,17 +60,25 @@ CREATE TABLE IF NOT EXISTS chunk_embeddings (
 
 
 class Store:
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path, *, db_lock: threading.RLock | None = None):
         self.path = str(path)
         if self.path != ":memory:":
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self.path)
+        # check_same_thread=False: ThreadingHTTPServer handlers share this connection.
+        # Callers must serialize all use via ``db_lock`` (Workspace does this).
+        self._conn = sqlite3.connect(self.path, check_same_thread=False)
+        self._db_lock = db_lock if db_lock is not None else threading.RLock()
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.executescript(SCHEMA)
 
     @property
     def connection(self) -> sqlite3.Connection:
         return self._conn
+
+    @property
+    def db_lock(self) -> threading.RLock:
+        """Reentrant lock that must guard every use of ``connection``."""
+        return self._db_lock
 
     def close(self) -> None:
         self._conn.close()

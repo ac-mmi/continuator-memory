@@ -1,0 +1,199 @@
+{
+  "title": "Canonical Evidence Adapter Architecture Audit",
+  "scope": "audit_only",
+  "not_in_scope": [
+    "html_implementation",
+    "docx_implementation",
+    "pdf_implementation",
+    "production_retrieval_changes",
+    "conversation_memory_changes",
+    "embeddings_reranker_changes",
+    "model_downloads",
+    "llm_ingestion"
+  ],
+  "current_architecture": {
+    "package": "src/continuator_memory/evidence/",
+    "modules": {
+      "models.py": ["Document", "EvidenceUnit", "IngestedDocument", "EvidenceHit", "SOURCE_TYPE_*"],
+      "markdown.py": ["MarkdownSection", "parse_markdown_sections", "build_retrieval_text", "section_id_for", "split_section_text"],
+      "ingest.py": ["ingest_markdown", "build_units_from_markdown", "canonicalize_source_uri", "document_id_for_uri", "evidence_id_for"],
+      "store.py": ["EvidenceStore", "ev_documents", "ev_units"],
+      "search.py": ["units_to_retrieval_units", "search_evidence", "resolve_provenance"]
+    },
+    "flow": [
+      "markdown_source",
+      "ingest_markdown",
+      "parse_markdown_sections",
+      "EvidenceUnit[]",
+      "EvidenceStore.save_document",
+      "units_to_retrieval_units",
+      "BM25Index.search"
+    ],
+    "parallel_paths": {
+      "scifact_adapter": "Document + sentence EvidenceUnits; source_type=text",
+      "semantic_ce_experiments": "consume existing EvidenceUnits; not ingest"
+    },
+    "conversation_memory": "unchanged_isolated"
+  },
+  "current_models": {
+    "Document": {
+      "persisted": true,
+      "table": "ev_documents",
+      "fields": [
+        "document_id",
+        "source_uri",
+        "source_type",
+        "content_hash",
+        "title",
+        "metadata",
+        "created_at"
+      ]
+    },
+    "EvidenceUnit": {
+      "persisted": true,
+      "table": "ev_units",
+      "fields": [
+        "evidence_id",
+        "document_id",
+        "ordinal",
+        "text",
+        "retrieval_text",
+        "heading_path",
+        "section_id",
+        "char_start",
+        "char_end",
+        "metadata"
+      ]
+    },
+    "MarkdownSection": {
+      "persisted": false,
+      "role": "in_memory_markdown_parse_node",
+      "fields": ["heading_path", "text", "char_start", "char_end", "heading_level"]
+    },
+    "implemented_source_types": ["markdown"],
+    "reserved_source_types": ["text", "pdf", "html", "code", "conversation"]
+  },
+  "section_concept": {
+    "exists_explicitly_persisted": false,
+    "exists_in_memory": true,
+    "encoded_on_units_via": ["heading_path", "section_id", "metadata.heading_level"],
+    "assessment": "Implicit section via heading_path is enough for retrieval; insufficient as multi-format parse API"
+  },
+  "hierarchy_assessment": {
+    "clean_enough_for_retrieval": true,
+    "clean_enough_as_multi_format_parse_api": false,
+    "limits": [
+      "no_queryable_section_tree",
+      "heading_path_title_based_not_id_based",
+      "duplicate_heading_slug_collisions",
+      "no_typed_page_bbox_xpath_provenance",
+      "no_adapter_boundary",
+      "retrieval_text_policy_adapter_local"
+    ]
+  },
+  "format_needs": {
+    "markdown": {
+      "hierarchy": "explicit_headings",
+      "provenance": "char_spans_natural"
+    },
+    "html": {
+      "hierarchy": "often_recoverable_h1_h6_or_section",
+      "provenance": "xpath_or_normalized_text_offsets"
+    },
+    "docx": {
+      "hierarchy": "often_recoverable_heading_styles",
+      "provenance": "paragraph_or_run_ids"
+    },
+    "pdf_digital_text": {
+      "hierarchy": "often_absent",
+      "provenance": "page_bbox_more_natural",
+      "must_not": "force_fake_headings"
+    }
+  },
+  "section_design_decision": {
+    "choice": "B",
+    "label": "in_memory_canonical_parse_structure",
+    "also_keep": "C_heading_path_on_persisted_EvidenceUnit",
+    "reject_for_now": "A_persisted_Section_rows",
+    "rationale": [
+      "smallest_safe_refactor_no_schema_migration",
+      "matches_existing_MarkdownSection_pattern",
+      "graceful_flat_degradation_for_pdf",
+      "avoids_dual_write_before_second_format_exists",
+      "pure_heading_path_alone_insufficient_as_adapter_api"
+    ],
+    "conceptual_parse_tree": "DocumentFields -> Section* -> (materialize) EvidenceUnit*",
+    "conceptual_persisted_tree": "Document -> EvidenceUnit* with heading_path/section_id"
+  },
+  "recommended_canonical_representation": {
+    "persisted": ["Document", "EvidenceUnit"],
+    "in_memory_add": ["CanonicalDocument", "CanonicalSection"],
+    "evidenceunit_heading_path_sufficient_for_retrieval": true,
+    "evidenceunit_heading_path_sufficient_as_sole_parse_api": false
+  },
+  "adapter_contract": {
+    "FormatAdapter": {
+      "methods": ["supports", "parse"],
+      "parse_returns": "CanonicalDocument",
+      "forbidden": ["store_writes", "search", "embeddings", "downloads", "fake_hierarchy"]
+    },
+    "Materializer": {
+      "input": "CanonicalDocument",
+      "output": "EvidenceUnit[]",
+      "owns": ["ordinal", "evidence_id", "retrieval_text_default_policy", "optional_size_split"]
+    },
+    "Orchestrator": {
+      "flow": ["parse", "materialize", "build_Document", "store.save_document"]
+    },
+    "provenance_policy": {
+      "prefer_char_spans_when_faithful_linearization": true,
+      "else": "metadata_locators_without_schema_change"
+    }
+  },
+  "markdown_compatibility": {
+    "schema_change_required": false,
+    "ingest_markdown": "facade_over_MarkdownAdapter",
+    "unit_identity_must_remain_stable": true,
+    "cli_names_can_remain": true,
+    "scifact_adapter_migration_required_now": false
+  },
+  "gaps": [
+    {"id": "no_format_adapter_interface", "severity": "high", "fix_now": true},
+    {"id": "section_only_md_private", "severity": "medium", "fix_now": true},
+    {"id": "no_persisted_section", "severity": "low", "fix_now": false},
+    {"id": "no_typed_layout_provenance", "severity": "medium", "fix_now": false},
+    {"id": "duplicate_heading_slugs", "severity": "low", "fix_now": false}
+  ],
+  "migration_steps": [
+    "audit_complete",
+    "add_canonical_types_adapter_protocol_materializer",
+    "migrate_markdown_behind_facade_with_golden_tests",
+    "html_adapter",
+    "docx_adapter",
+    "pdf_digital_text_flat_first",
+    "revisit_persisted_section_or_typed_provenance_if_needed"
+  ],
+  "risks": [
+    "accidental_md_unit_identity_change",
+    "over_abstract_universal_chunker",
+    "pdf_fake_headings",
+    "retrieval_coupled_to_format"
+  ],
+  "invariants": [
+    "conversation_memory_untouched",
+    "ev_schema_document_plus_unit_until_measured_need",
+    "adapters_no_search_embeddings_downloads",
+    "empty_heading_path_first_class",
+    "stable_source_uri_document_id",
+    "materializer_ordinal_equals_reading_order"
+  ],
+  "implementation_order": [
+    "adapter_contract_canonical_section_materializer",
+    "markdown_adapter_migration",
+    "html_adapter",
+    "docx_adapter",
+    "pdf_digital_text_adapter",
+    "optional_persisted_section_or_typed_provenance"
+  ],
+  "one_next_implementation_step": "Implement in-memory CanonicalDocument/CanonicalSection, FormatAdapter protocol, shared EvidenceUnit materializer, and migrate Markdown behind existing ingest_markdown facade with golden tests proving EvidenceUnit identity and heading_path/retrieval_text unchanged. Do not add HTML/DOCX/PDF; do not change ev_* schema or retrieval."
+}

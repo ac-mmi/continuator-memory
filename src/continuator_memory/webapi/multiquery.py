@@ -146,6 +146,25 @@ def _fused_rows(candidates: list[FusedCandidate]) -> list[dict[str, Any]]:
     ]
 
 
+def fused_ranked_message_ids(candidates: list[FusedCandidate]) -> list[str]:
+    """Message IDs in fused-rank order (first occurrence wins). Used for eval metrics."""
+    ids: list[str] = []
+    for item in candidates:
+        for message_id in item.source_message_ids or item.result.source_message_ids:
+            if message_id not in ids:
+                ids.append(message_id)
+    return ids
+
+
+def resolve_search_depth(k: int, per_query_k: int, depth: int | None) -> int:
+    """CLI/eval ``depth`` wins when set; otherwise product default ``max(k, per_query_k)``."""
+    if depth is None:
+        return max(k, per_query_k)
+    if depth < 1:
+        raise ValueError("depth must be >= 1")
+    return depth
+
+
 def _message_rows(candidates: list[FusedCandidate], conversation_id: str) -> list[_MetricRow]:
     return [
         _MetricRow(conversation_id, item.source_message_ids or item.result.source_message_ids)
@@ -178,9 +197,38 @@ def build_memory_retriever(
     relations: Iterable[Relation],
     embedder: Embedder,
     config: RetrievalConfig | None = None,
+    consolidator=None,
+    *,
+    contextual_enrichment: bool = False,
 ) -> MemoryRetriever:
-    consolidator = consolidate(conversation.conversation_id, claims, relations)
-    retriever = MemoryRetriever(embedder, config or RetrievalConfig())
+    """Build an in-memory retriever over consolidated memories.
+
+    When ``contextual_enrichment`` is True (``contextual_lexical`` mode), index ephemeral
+    Memory copies whose ``content`` includes same-session ±1 neighbour text. Stored memories
+    and ``MemorySource`` rows are unchanged; dual-embedding ``context_weight`` contexts are
+    not applied (clean Option B experiment).
+    """
+    if consolidator is None:
+        consolidator = consolidate(conversation.conversation_id, claims, relations)
+    resolved = config or RetrievalConfig()
+    if contextual_enrichment:
+        # Do not combine enriched indexed text with the older dual-vector context path.
+        resolved = replace(resolved, context_weight=0.0)
+    retriever = MemoryRetriever(embedder, resolved)
+    if contextual_enrichment:
+        from continuator_memory.v2.contextual_units import memories_with_contextual_retrieval_text
+
+        enriched = memories_with_contextual_retrieval_text(
+            conversation, consolidator.memories.values(),
+        )
+        retriever.index(
+            enriched,
+            consolidator.sources,
+            consolidator.links,
+            consolidator.conversation_id,
+            contexts=None,
+        )
+        return retriever
     contexts = None
     if retriever.config.context_weight > 0:
         contexts = previous_turn_contexts(conversation, consolidator.memories.values())
@@ -239,26 +287,34 @@ def retrieve_multiquery_evidence(
     planner=None,
     config: RetrievalConfig | None = None,
     per_query_k: int = DEFAULT_PER_QUERY_K,
+    depth: int | None = None,
     rrf_c: int = DEFAULT_RRF_C,
     expected_message_ids: Iterable[str] | None = None,
     retriever: MemoryRetriever | None = None,
     original_weight: float = DEFAULT_ORIGINAL_WEIGHT,
+    consolidator=None,
 ) -> tuple[SourceEvidence, dict[str, Any]]:
-    """Plan queries, retrieve each with MemoryRetriever, fuse with RRF, then budget sources."""
+    """Plan queries, retrieve each with MemoryRetriever, fuse with RRF, then budget sources.
+
+    ``depth`` is the per-query ranking depth (and fused metric depth). When omitted, product
+    behavior keeps ``max(k, per_query_k)``. Eval harnesses pass CLI ``--depth``.
+    """
     if k < 1:
         raise ValueError("k must be >= 1")
     if per_query_k < 1:
         raise ValueError("per_query_k must be >= 1")
 
     started = time.perf_counter()
-    plan = resolve_plan(question, planner)
+    plan = resolve_plan(question, planner, embedder=embedder)
     plan_ms = round((time.perf_counter() - started) * 1000, 3)
 
     retrieve_started = time.perf_counter()
     if retriever is None:
-        retriever = build_memory_retriever(conversation, claims, relations, embedder, config)
-    depth = max(k, per_query_k)
-    outcomes = search_queries(retriever, plan.queries, conversation.conversation_id, depth)
+        retriever = build_memory_retriever(
+            conversation, claims, relations, embedder, config, consolidator=consolidator,
+        )
+    search_depth = resolve_search_depth(k, per_query_k, depth)
+    outcomes = search_queries(retriever, plan.queries, conversation.conversation_id, search_depth)
     retrieve_ms = round((time.perf_counter() - retrieve_started) * 1000, 3)
 
     rankings = [outcome.results for outcome in outcomes]
@@ -273,6 +329,7 @@ def retrieve_multiquery_evidence(
         original_outcome=original,
         original_weight=original_weight,
     )
+    metric_fused = fused[:search_depth]
 
     baseline_rows = _message_rows(
         [
@@ -310,10 +367,11 @@ def retrieve_multiquery_evidence(
             {"query": query, "rankings": _ranking_rows(outcome.results)}
             for query, outcome in zip(plan.queries, outcomes)
         ],
-        "fusedRanking": _fused_rows(fused[:depth]),
+        "fusedRanking": _fused_rows(metric_fused),
+        "rankedMessageIds": fused_ranked_message_ids(metric_fused),
         "retrievalComparison": comparison,
         "rrfC": rrf_c,
-        "perQueryK": depth,
+        "perQueryK": search_depth,
         "originalWeight": original_weight,
     }
     return evidence, diagnostics

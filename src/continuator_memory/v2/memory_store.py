@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterable
 
 from continuator_memory.v2.consolidation import Consolidator
 from continuator_memory.v2.memory import (
@@ -20,6 +21,7 @@ from continuator_memory.v2.memory import (
     MemoryLink,
     MemorySource,
 )
+from continuator_memory.v2.models import Claim, Relation
 from continuator_memory.v2.store import SemanticStore
 
 _STATUSES = ", ".join(f"'{s}'" for s in MEMORY_STATUSES)
@@ -103,10 +105,14 @@ class MemoryStore:
         self._conn = connection
         self._conn.executescript(MEMORY_SCHEMA)
 
+    def clear_conversation(self, conversation_id: str) -> None:
+        """Delete memory snapshot rows inside the caller's open transaction; does not commit."""
+        for table in _TABLES:
+            self._conn.execute(f"DELETE FROM {table} WHERE conversation_id = ?", (conversation_id,))
+
     def delete_conversation(self, conversation_id: str) -> None:
         with self._conn:
-            for table in _TABLES:
-                self._conn.execute(f"DELETE FROM {table} WHERE conversation_id = ?", (conversation_id,))
+            self.clear_conversation(conversation_id)
 
     def save(self, consolidator: Consolidator) -> None:
         cid = consolidator.conversation_id
@@ -178,6 +184,33 @@ class MemoryStore:
         return [Decision(claim_id, action, mid, tuple(json.loads(sup)), tuple(json.loads(con)), reason, unresolved)
                 for claim_id, action, mid, sup, con, reason, unresolved in rows]
 
+    def has_snapshot(self, conversation_id: str) -> bool:
+        """True when any consolidated memory row exists for the conversation."""
+        for table in _TABLES:
+            if self._conn.execute(
+                f"SELECT 1 FROM {table} WHERE conversation_id = ? LIMIT 1", (conversation_id,)
+            ).fetchone():
+                return True
+        return False
+
+    def load_consolidator(self, conversation_id: str) -> Consolidator | None:
+        """Hydrate a Consolidator from a persisted snapshot, or None if none is stored.
+
+        Does not re-run consolidation. Identity indexes used only during ``apply`` are left
+        empty; memories, sources, links, decisions and claim→memory provenance are restored.
+        """
+        if not self.has_snapshot(conversation_id):
+            return None
+        consolidator = Consolidator(conversation_id)
+        for memory in self.get_memories(conversation_id):
+            consolidator.memories[memory.memory_id] = memory
+        consolidator.sources = self.get_sources(conversation_id)
+        consolidator.links = self.get_links(conversation_id)
+        consolidator.decisions = self.get_decisions(conversation_id)
+        for source in consolidator.sources:
+            consolidator._memory_of[source.claim_id] = source.memory_id
+        return consolidator
+
 
 def consolidate_stored(connection: sqlite3.Connection, conversation_id: str) -> Consolidator:
     """Consolidate the conversation's stored V2 claims and relations and save the result."""
@@ -185,4 +218,33 @@ def consolidate_stored(connection: sqlite3.Connection, conversation_id: str) -> 
     consolidator = Consolidator(conversation_id)
     consolidator.apply(semantic.get_claims(conversation_id), semantic.get_relations(conversation_id))
     MemoryStore(connection).save(consolidator)
+    return consolidator
+
+
+def resolve_consolidator(
+    connection: sqlite3.Connection,
+    conversation_id: str,
+    claims: Iterable[Claim] | None = None,
+    relations: Iterable[Relation] | None = None,
+    *,
+    persist_if_missing: bool = False,
+) -> Consolidator:
+    """Prefer a persisted memory snapshot; otherwise consolidate (optionally persist).
+
+    Product retrieval and Workspace listing use this so older databases without a
+    snapshot still work, while successful V2 ingests write snapshots eagerly.
+    """
+    from continuator_memory.v2.consolidation import consolidate
+
+    store = MemoryStore(connection)
+    loaded = store.load_consolidator(conversation_id)
+    if loaded is not None:
+        return loaded
+    if claims is None or relations is None:
+        semantic = SemanticStore(connection)
+        claims = semantic.get_claims(conversation_id) if claims is None else claims
+        relations = semantic.get_relations(conversation_id) if relations is None else relations
+    consolidator = consolidate(conversation_id, claims, relations)
+    if persist_if_missing:
+        store.save(consolidator)
     return consolidator

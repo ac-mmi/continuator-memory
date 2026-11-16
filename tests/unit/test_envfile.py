@@ -2,12 +2,26 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+
+import pytest
 
 from continuator_memory.envfile import apply_env_file, load_root_env, parse_env_line
 from continuator_memory.webapi.answering import NOT_CONFIGURED_ANSWER, load_generation_settings
 from continuator_memory.webapi.workspace import Workspace, open_workspace
 from tests.helpers import HashingEmbedder
+
+def _clear_model_env(monkeypatch) -> None:
+    """Remove the model settings so that teardown also removes what ``load_root_env`` writes.
+
+    ``delenv`` records nothing for an absent variable, and ``load_root_env`` writes to ``os.environ`` directly.
+    Setting the variable first makes monkeypatch record that it was originally absent.
+    """
+    for key in ("CONTINUATOR_OLLAMA_MODEL", "CONTINUATOR_ANSWER_MODEL"):
+        monkeypatch.setenv(key, "")
+        monkeypatch.delenv(key)
+
 
 ENV_BODY = """
 # comment
@@ -51,8 +65,7 @@ def test_missing_env_file_is_a_noop(tmp_path):
 def test_load_generation_settings_reads_file_then_preserves_shell(tmp_path, monkeypatch):
     path = tmp_path / ".env"
     path.write_text("CONTINUATOR_OLLAMA_MODEL=qwen2.5:1.5b\n", encoding="utf-8")
-    monkeypatch.delenv("CONTINUATOR_OLLAMA_MODEL", raising=False)
-    monkeypatch.delenv("CONTINUATOR_ANSWER_MODEL", raising=False)
+    _clear_model_env(monkeypatch)
     load_root_env(paths=(path,))
     settings = load_generation_settings()
     assert settings.configured is True
@@ -79,8 +92,7 @@ def test_missing_model_still_explains_configuration(monkeypatch):
 def test_open_workspace_loads_env_before_generation_settings(tmp_path, monkeypatch):
     path = tmp_path / ".env"
     path.write_text("CONTINUATOR_OLLAMA_MODEL=qwen2.5:1.5b\n", encoding="utf-8")
-    monkeypatch.delenv("CONTINUATOR_OLLAMA_MODEL", raising=False)
-    monkeypatch.delenv("CONTINUATOR_ANSWER_MODEL", raising=False)
+    _clear_model_env(monkeypatch)
     monkeypatch.setattr(
         "continuator_memory.envfile.default_env_paths",
         lambda: (path,),
@@ -95,3 +107,25 @@ def test_example_env_documents_the_default_model():
     assert "CONTINUATOR_OLLAMA_MODEL=qwen2.5:1.5b" in text
     assert "CONTINUATOR_ANSWER_MODEL" in text
     assert "OLLAMA_HOST" in text
+
+
+@pytest.mark.parametrize("key", ["CONTINUATOR_OLLAMA_MODEL", "CONTINUATOR_ANSWER_MODEL"])
+def test_clear_model_env_restores_an_originally_absent_variable(key):
+    """The monkeypatch teardown alone must remove what load_root_env wrote."""
+    os.environ.pop(key, None)
+    patcher = pytest.MonkeyPatch()
+    _clear_model_env(patcher)
+    os.environ[key] = "from-file"
+    patcher.undo()
+    assert key not in os.environ
+
+
+def test_clear_model_env_restores_an_originally_set_variable():
+    key = "CONTINUATOR_OLLAMA_MODEL"
+    os.environ[key] = "from-shell"
+    patcher = pytest.MonkeyPatch()
+    _clear_model_env(patcher)
+    assert key not in os.environ
+    os.environ[key] = "from-file"
+    patcher.undo()
+    assert os.environ[key] == "from-shell"

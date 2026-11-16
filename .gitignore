@@ -9,3 +9,12 @@ dist/
 data/
 *.db
 .env
+.DS_Store
+
+# Local smoke / publish measurement outputs (regenerate; do not ship DBs).
+results/publish/smoke/
+results/publish/release_readiness/*.db
+
+# LongMemEval dataset files; the README stays tracked.
+benchmarks/datasets/longmemeval/longmemeval_*.json
+benchmarks/external/longmemeval/longmemeval_s_cleaned.json

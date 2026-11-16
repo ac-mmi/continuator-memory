@@ -31,6 +31,8 @@ from continuator_memory.webapi.multiquery import (
     _ranking_rows,
     build_memory_retriever,
     evidence_from_rankings,
+    fused_ranked_message_ids,
+    resolve_search_depth,
     retrieval_metrics,
     search_queries,
 )
@@ -73,12 +75,15 @@ def retrieve_iterative_evidence(
     evaluator=None,
     config: RetrievalConfig | None = None,
     per_query_k: int = DEFAULT_PER_QUERY_K,
+    depth: int | None = None,
     rrf_c: int = DEFAULT_RRF_C,
     expected_message_ids: Iterable[str] | None = None,
     retriever: MemoryRetriever | None = None,
     max_rounds: int = MAX_ROUNDS,
     original_weight: float = DEFAULT_ORIGINAL_WEIGHT,
+    consolidator=None,
 ) -> tuple[SourceEvidence, dict[str, Any]]:
+    """Bounded iterative retrieval. ``depth`` matches multiquery (CLI ``--depth`` when set)."""
     if k < 1:
         raise ValueError("k must be >= 1")
     if per_query_k < 1:
@@ -87,12 +92,14 @@ def retrieve_iterative_evidence(
         raise ValueError(f"max_rounds must be 1..{MAX_ROUNDS}")
 
     started = time.perf_counter()
-    plan = resolve_plan(question, planner)
+    plan = resolve_plan(question, planner, embedder=embedder)
     plan_ms = round((time.perf_counter() - started) * 1000, 3)
 
     if retriever is None:
-        retriever = build_memory_retriever(conversation, claims, relations, embedder, config)
-    depth = max(k, per_query_k)
+        retriever = build_memory_retriever(
+            conversation, claims, relations, embedder, config, consolidator=consolidator,
+        )
+    search_depth = resolve_search_depth(k, per_query_k, depth)
     cid = conversation.conversation_id
 
     all_rankings: list = []
@@ -114,7 +121,7 @@ def retrieve_iterative_evidence(
             stop_reason = STOP_NO_NEXT_QUERIES
             break
         retrieve_started = time.perf_counter()
-        outcomes = search_queries(retriever, pending_queries, cid, depth)
+        outcomes = search_queries(retriever, pending_queries, cid, search_depth)
         retrieve_ms += time.perf_counter() - retrieve_started
         if original_outcome is None:
             original_outcome = outcomes[0]
@@ -174,6 +181,7 @@ def retrieve_iterative_evidence(
     if evidence is None or original_outcome is None:
         raise RuntimeError("iterative retrieval produced no evidence")
 
+    metric_fused = fused[:search_depth]
     comparison = {
         "baseline": {
             "k": k,
@@ -213,13 +221,14 @@ def retrieve_iterative_evidence(
     diagnostics = {
         "queryPlan": plan.to_dict(),
         "queryRankings": query_blocks,
-        "fusedRanking": _fused_rows(fused[:depth]),
+        "fusedRanking": _fused_rows(metric_fused),
+        "rankedMessageIds": fused_ranked_message_ids(metric_fused),
         "retrievalComparison": comparison,
         "iterativeRounds": rounds,
         "stopReason": stop_reason,
         "roundCount": len(rounds),
         "rrfC": rrf_c,
-        "perQueryK": depth,
+        "perQueryK": search_depth,
         "originalWeight": original_weight,
     }
     return evidence, diagnostics

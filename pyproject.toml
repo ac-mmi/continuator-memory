@@ -5,11 +5,36 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "continuator-memory"
 version = "0.1.0"
-description = "Phase 1: minimal deterministic conversational RAG baseline."
+description = "Local-first provenance-first memory and evidence infrastructure for AI applications."
 readme = "README.md"
+license = { text = "MIT" }
 requires-python = ">=3.10"
+authors = [{ name = "Aman Chadha" }]
+keywords = ["memory", "rag", "context-pack", "provenance", "local-first", "sqlite"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.urls]
+Homepage = "https://github.com/ac-mmi/continuator-memory"
+Repository = "https://github.com/ac-mmi/continuator-memory"
+Issues = "https://github.com/ac-mmi/continuator-memory/issues"
+Documentation = "https://github.com/ac-mmi/continuator-memory#quickstart-5-minutes"
+# Default install stays "works for /context" out of the box. sentence-transformers
+# (and its torch stack) is required for memory retrieval embeddings; document BM25
+# ingest/search does not need it, but splitting an [embeddings] extra would make the
+# default Context Pack path fail until a second install step — deferred intentionally.
 dependencies = [
+    "beautifulsoup4>=4.12",
     "numpy>=1.26",
+    "pypdf>=5.0",
+    "python-docx>=1.1",
     "sentence-transformers>=3.0",
 ]
 
@@ -30,4 +55,5 @@ pythonpath = ["."]
 addopts = "-ra"
 markers = [
     "integration: tests that need the real local embedding model",
+    "live_ollama: tests that intentionally connect to a real Ollama (blocked otherwise)",
 ]

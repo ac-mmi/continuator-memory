@@ -1,0 +1,508 @@
+{
+  "any_dataset_supports_multi_evidence_required": false,
+  "audit_only": true,
+  "can_implement_evidence_set_coverage_at_k_now": false,
+  "datasets": {
+    "hard_evidence_plan": {
+      "classification_counts": {
+        "ALTERNATIVE_GOLD": 0,
+        "MULTI_EVIDENCE_REQUIRED": 0,
+        "SINGLE_EVIDENCE": 0,
+        "UNKNOWN": 0
+      },
+      "dataset_id": "hard_evidence_retrieval_plan",
+      "explicit_and_or_fields": true,
+      "gold_format": "Proposed: required_ids_resolve (AND), acceptable_any_of (OR), supporting_resolve \u2014 NOT present as data",
+      "gold_semantics": "Future schema would explicitly distinguish MULTI_EVIDENCE_REQUIRED (required_ids) from ALTERNATIVE_GOLD (acceptable_any_of). No questions exist yet \u2014 do not count as evaluable.",
+      "n_multi_gold": 0,
+      "n_questions": 0,
+      "n_single_gold": 0,
+      "path": "docs/hard-evidence-retrieval-benchmark-plan.md",
+      "status": "plan_only_fixtures_not_authored",
+      "supports_evidence_set_coverage": false
+    },
+    "locomo_note": {
+      "classification_counts": {
+        "ALTERNATIVE_GOLD": 0,
+        "MULTI_EVIDENCE_REQUIRED": 0,
+        "SINGLE_EVIDENCE": 0,
+        "UNKNOWN": 0
+      },
+      "dataset_id": "locomo10_conversation_memory",
+      "gold_semantics": "Questions may have multiple gold message IDs; analyses compute partial vs full gold coverage. Dataset does not ship explicit AND-required vs OR-alternative fields for EvidenceUnits.",
+      "note": "Out of scope for EvidenceUnit evidence-set coverage; inventoried only.",
+      "path": "benchmarks/publish/ (LoCoMo harness + multi_evidence_coverage analysis)",
+      "scope": "conversation MemorySource / message golds \u2014 not Document EvidenceUnit",
+      "supports_evidence_set_coverage_for_evidence_units": false
+    },
+    "scifact_dev": {
+      "claim_top_level_keys": [
+        "id",
+        "claim",
+        "evidence",
+        "cited_doc_ids"
+      ],
+      "classification_counts": {
+        "ALTERNATIVE_GOLD": 0,
+        "MULTI_EVIDENCE_REQUIRED": 0,
+        "SINGLE_EVIDENCE": 96,
+        "UNKNOWN": 92
+      },
+      "dataset_id": "scifact_claims_dev",
+      "evidence_block_keys": [
+        "sentences",
+        "label"
+      ],
+      "explicit_and_or_fields": false,
+      "gold_format": "evidence[doc_id][] = {sentences: [idx...], label: SUPPORT|CONTRADICT}; flattened to N (doc_id, sentence_index) gold EvidenceUnits",
+      "gold_semantics": "Annotated rationale sentences for SUPPORT or CONTRADICT. Multiple gold sentence IDs mean multiple annotated evidence sentences \u2014 NOT an explicit AND-required answer set, and NOT an explicit OR-alternative set. Official retrieval metrics may score set coverage over annotations, but that is not the same as MULTI_EVIDENCE_REQUIRED for answering.",
+      "label_set_counts": {
+        "('CONTRADICT',)": 64,
+        "('SUPPORT',)": 124
+      },
+      "n_claims_total": 300,
+      "n_documents_corpus": null,
+      "n_multi_document_gold": 10,
+      "n_multi_gold": 92,
+      "n_questions": 188,
+      "n_single_gold": 96,
+      "our_metrics_on_scifact": {
+        "hit_at_k": "ANY gold evidence_id in top-K (first_any_rank)",
+        "mrr": "reciprocal of first ANY gold rank",
+        "sentence_recall_at_k": "coverage_at_k = |top-K \u2229 gold_ids| / |gold_ids| (fraction of annotated golds; not labeled AND-required)"
+      },
+      "path": "benchmarks/evidence_retrieval/external/scifact/claims_dev.jsonl",
+      "supports_evidence_set_coverage": false
+    },
+    "structured_corpus": {
+      "classification_counts": {
+        "ALTERNATIVE_GOLD": 0,
+        "MULTI_EVIDENCE_REQUIRED": 0,
+        "SINGLE_EVIDENCE": 40,
+        "UNKNOWN": 0
+      },
+      "dataset_id": "evidence_retrieval_structured_corpus",
+      "explicit_and_or_fields": false,
+      "gold_format": "single document_key + heading_path (+ optional text_contains) \u2192 exactly one EvidenceUnit",
+      "gold_semantics": "Each question resolves to exactly one EvidenceUnit. No required_ids / acceptable_any_of / AND-OR metadata.",
+      "n_documents": 4,
+      "n_multi_gold": 0,
+      "n_questions": 40,
+      "n_single_gold": 40,
+      "path": "benchmarks/evidence_retrieval/corpus/questions.json",
+      "questions": [
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "api_q01"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "api_q02"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "api_q03"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "api_q04"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "api_q05"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "api_q06"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "api_q07"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "api_q08"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "api_q09"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "api_q10"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "prod_q01"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "prod_q02"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "prod_q03"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "prod_q04"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "prod_q05"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "prod_q06"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "prod_q07"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "prod_q08"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "prod_q09"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "prod_q10"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "ops_q01"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "ops_q02"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "ops_q03"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "ops_q04"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "ops_q05"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "ops_q06"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "ops_q07"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "ops_q08"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "ops_q09"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "ops_q10"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "arch_q01"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "arch_q02"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "arch_q03"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "arch_q04"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "arch_q05"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "arch_q06"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "arch_q07"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "arch_q08"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "arch_q09"
+        },
+        {
+          "classification": "SINGLE_EVIDENCE",
+          "gold_fields": [
+            "document_key",
+            "heading_path"
+          ],
+          "n_gold": 1,
+          "question_id": "arch_q10"
+        }
+      ],
+      "supports_evidence_set_coverage": false
+    }
+  },
+  "experiment": "evidence_set_coverage_dataset_audit",
+  "inventory": [
+    {
+      "dataset": "evidence_retrieval_structured_corpus",
+      "gold_format": "single document_key + heading_path (+ optional text_contains) \u2192 exactly one EvidenceUnit",
+      "questions_or_claims": 40,
+      "supports_evidence_set_coverage": false
+    },
+    {
+      "dataset": "scifact_claims_dev",
+      "gold_format": "evidence[doc_id][] = {sentences: [idx...], label: SUPPORT|CONTRADICT}; flattened to N (doc_id, sentence_index) gold EvidenceUnits",
+      "questions_or_claims": 188,
+      "supports_evidence_set_coverage": false
+    },
+    {
+      "dataset": "hard_evidence_retrieval_plan",
+      "gold_format": "Proposed: required_ids_resolve (AND), acceptable_any_of (OR), supporting_resolve \u2014 NOT present as data",
+      "questions_or_claims": 0,
+      "supports_evidence_set_coverage": false
+    },
+    {
+      "dataset": "locomo10_conversation_memory",
+      "gold_format": "Questions may have multiple gold message IDs; analyses compute partial vs full gold coverage. Dataset does not ship explicit AND-required vs OR-alternative fields for EvidenceUnits.",
+      "questions_or_claims": "N/A (conversation path)",
+      "supports_evidence_set_coverage": false
+    }
+  ],
+  "metric_gap": {
+    "hit_at_k": "ANY supporting / any annotated gold found",
+    "measures_complete_required_set": false,
+    "mrr": "reciprocal rank of first ANY gold",
+    "reason": "No dataset marks which multi-gold IDs are jointly required for a complete answer versus interchangeable alternatives.",
+    "recall_at_k_structured": "equals Hit@K (single gold)",
+    "sentence_recall_at_k_scifact": "fraction of annotated gold EvidenceUnits in top-K \u2014 set coverage over annotations, NOT labeled complete-required-answer coverage"
+  },
+  "recommendation": {
+    "code": "C",
+    "label": "Existing datasets do NOT represent required evidence sets",
+    "rationale": "No evaluable corpus encodes MULTI_EVIDENCE_REQUIRED vs ALTERNATIVE_GOLD. Structured corpus is entirely SINGLE_EVIDENCE. SciFact multi-gold annotations are UNKNOWN (annotated rationales, not AND/OR). Hard-evidence plan defines the needed fields but has zero authored questions. Do not fake Evidence-Set Coverage@K.",
+    "smallest_missing_structure": {
+      "can_implement_after_fixtures": true,
+      "can_implement_metric_now": false,
+      "fields": [
+        "required_ids_resolve (AND \u2014 all needed)",
+        "acceptable_any_of (OR \u2014 any-of groups)",
+        "optional supporting_resolve"
+      ],
+      "reference": "docs/hard-evidence-retrieval-benchmark-plan.md"
+    }
+  }
+}

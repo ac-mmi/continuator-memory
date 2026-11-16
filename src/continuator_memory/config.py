@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Mapping
 
 DEFAULT_DB_PATH = "data/continuator.db"
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
@@ -13,6 +14,50 @@ DEFAULT_OLLAMA_HOST = "http://localhost:11434"
 DEFAULT_WINDOW_SIZE = 4
 DEFAULT_OVERLAP = 2
 DEFAULT_TOP_K = 5
+
+# Legacy alias used by older docs/scripts. Prefer CONTINUATOR_DB_PATH.
+_LEGACY_IMPORT_DB_ENV = "CONTINUATOR_IMPORT_DB"
+_CANONICAL_DB_ENV = "CONTINUATOR_DB_PATH"
+
+
+def resolve_product_db_path(
+    *,
+    env: Mapping[str, str] | None = None,
+    explicit: str | Path | None = None,
+) -> Path:
+    """Return the canonical product SQLite path.
+
+    Precedence:
+    1. ``explicit`` (CLI ``--db``, ``import_text(db_path=…)``, etc.)
+    2. ``CONTINUATOR_DB_PATH`` (canonical)
+    3. ``CONTINUATOR_IMPORT_DB`` (legacy alias, for backward compatibility)
+    4. ``data/continuator.db``
+
+    Import, CLI document ingest, and ``Settings.db_path`` all use this resolver so a
+    single variable is enough. When both legacy variables are set to different
+    paths, ``CONTINUATOR_DB_PATH`` wins for all product writes.
+    """
+    if explicit is not None:
+        return Path(explicit)
+    mapping = os.environ if env is None else env
+    canonical = mapping.get(_CANONICAL_DB_ENV)
+    if canonical:
+        return Path(canonical)
+    legacy = mapping.get(_LEGACY_IMPORT_DB_ENV)
+    if legacy:
+        return Path(legacy)
+    return Path(DEFAULT_DB_PATH)
+
+
+def legacy_import_db_path(env: Mapping[str, str] | None = None) -> Path | None:
+    """Return ``CONTINUATOR_IMPORT_DB`` when set, else ``None``.
+
+    Used only for the historical ``open_workspace`` fallback when serving an empty
+    default DB. Normal import/ingest paths must use :func:`resolve_product_db_path`.
+    """
+    mapping = os.environ if env is None else env
+    raw = mapping.get(_LEGACY_IMPORT_DB_ENV)
+    return Path(raw) if raw else None
 
 
 @dataclass(frozen=True)
@@ -31,7 +76,7 @@ class Settings:
         env = os.environ
         ollama_model = env.get("CONTINUATOR_OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL)
         return cls(
-            db_path=Path(env.get("CONTINUATOR_DB_PATH", DEFAULT_DB_PATH)),
+            db_path=resolve_product_db_path(env=env),
             embedding_model=env.get("CONTINUATOR_EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL),
             ollama_model=ollama_model,
             ollama_host=env.get("OLLAMA_HOST", DEFAULT_OLLAMA_HOST),

@@ -1,7 +1,9 @@
-"""Grounded answer generation from already-retrieved source evidence.
+"""Grounded answer generation from an assembled Context Pack / AnswerContext.
 
-The model sees only budgeted source excerpts plus memory IDs that those excerpts
-belong to. It does not search memory itself. Hosts and API keys stay server-side.
+Callers retrieve via ``Workspace.context`` (or ``POST /context``), then optionally
+pass ``pack.answer_context`` here. The model sees only budgeted source excerpts
+plus memory IDs that those excerpts belong to. It does not search memory itself.
+Hosts and API keys stay server-side.
 """
 
 from __future__ import annotations
@@ -178,6 +180,7 @@ class AnswerContext:
     truncated: bool
     max_context_chars: int | None
     budget: dict[str, Any] = field(default_factory=dict)
+    question_date: str | None = None  # the date the question is asked, as supplied by the caller
 
 
 def load_generation_settings() -> GenerationSettings:
@@ -252,6 +255,7 @@ def build_answer_context(
     context_tokens: int = ANSWER_NUM_CTX,
     output_tokens: int = DEFAULT_NUM_PREDICT,
     system: str = SYSTEM_PROMPT,
+    question_date: str | None = None,
 ) -> AnswerContext:
     """Render the answer prompt within a token budget.
 
@@ -260,6 +264,10 @@ def build_answer_context(
     long excerpts are trimmed to a shared cap before any excerpt is left out, and only the
     lowest-ranked ones are left out when even a minimal share does not fit. ``max_context_chars``
     is an optional extra ceiling on excerpt characters, applied the same way.
+
+    ``question_date`` is the date the question is asked, as supplied by the caller (for example a
+    benchmark's question date); it is never taken from the clock. When given, the question frame
+    gains a ``Current date:`` line; when None the prompt is unchanged.
     """
     selected = list(evidence.selection.selected)
     dropped_messages = list(evidence.selection.dropped)
@@ -277,7 +285,7 @@ def build_answer_context(
 
     candidates = [by_id[mid] for mid in selected if mid in by_id]
     budget = PromptBudget(context_tokens, output_tokens)
-    available = budget.evidence_tokens(f"{system}\n{_render_prompt(question, [])}")
+    available = budget.evidence_tokens(f"{system}\n{_render_prompt(question, [], question_date)}")
     marker = estimate_tokens("… [truncated]")
     full = [excerpt(m, m.content, False) for m in candidates]
     fixed = [estimate_tokens(_render_block(replace(item, content=""))) + marker + 1 for item in full]
@@ -305,12 +313,12 @@ def build_answer_context(
         return items, trimmed
 
     excerpts, trimmed_ids = render(keep)
-    prompt = _render_prompt(question, excerpts)
+    prompt = _render_prompt(question, excerpts, question_date)
     estimated = budget.template_tokens + estimate_tokens(system) + estimate_tokens(prompt)
     while excerpts and estimated + output_tokens > context_tokens:  # rounding guard; never exceed
         keep -= 1
         excerpts, trimmed_ids = render(keep)
-        prompt = _render_prompt(question, excerpts)
+        prompt = _render_prompt(question, excerpts, question_date)
         estimated = budget.template_tokens + estimate_tokens(system) + estimate_tokens(prompt)
     budget_dropped = [m.message_id for m in candidates[keep:]]
     used_message_ids = [item.message_id for item in excerpts]
@@ -365,6 +373,7 @@ def build_answer_context(
             "droppedForBudget": budget_dropped,
             "estimator": "conservative-qwen2-bpe-v1",
         },
+        question_date=question_date,
     )
 
 
@@ -379,13 +388,23 @@ def _render_block(item: PromptExcerpt) -> str:
     return block
 
 
-def _render_prompt(question: str, excerpts: list[PromptExcerpt]) -> str:
+def _question_date_label(question_date: str | None) -> str | None:
+    """The question date in the excerpts' message-date style; verbatim when it cannot be parsed."""
+    if question_date is None or not question_date.strip():
+        return None
+    day = message_day(question_date)
+    return format_date(day) if day else question_date.strip()
+
+
+def _render_prompt(question: str, excerpts: list[PromptExcerpt], question_date: str | None = None) -> str:
     body = "\n\n".join(_render_block(item) for item in excerpts) if excerpts else (
         "(no source excerpts were selected for the model)")
+    label = _question_date_label(question_date)
+    dated = f"Current date: {label}\n" if label else ""
     return (
         "Source excerpts. Cite using only the square-bracket message id on the same "
         "line as the supporting text.\n\n"
-        f"{body}\n\nQuestion: {question}\nAnswer:"
+        f"{body}\n\n{dated}Question: {question}\nAnswer:"
     )
 
 

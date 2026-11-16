@@ -18,7 +18,12 @@ from continuator_memory.cli import main
 from continuator_memory.models import Conversation, Message
 from continuator_memory.store import Store
 from continuator_memory.v2.bprime_links import BPrimeConfig
+from continuator_memory.v2.atomizer import AtomizationResult
 from continuator_memory.v2.memory import memory_id
+from continuator_memory.v2.models import Claim, Provenance
+from continuator_memory.v2.validation import ValidatedWindow
+from continuator_memory.webapi.extract import PassThroughAtomizer
+from continuator_memory.webapi.query_plan import QueryPlan
 from continuator_memory.webapi.server import make_server
 from continuator_memory.webapi.transcript import IMPORTED_CONVERSATION_ID
 from continuator_memory.webapi.workspace import Workspace, open_workspace
@@ -81,12 +86,19 @@ def test_bprime_adds_guitar_via_related_link(workspace: Workspace):
     assert "m-guitar" in evidence["selectedMessageIds"]
 
 
-def test_hybrid_mode_is_available(workspace: Workspace):
-    result = workspace.ask(QUESTION, retrieval_mode="hybrid", generate=False)
+def test_lexical_mode_is_available(workspace: Workspace):
+    result = workspace.ask(QUESTION, retrieval_mode="lexical", generate=False)
     evidence = result["answer"]["evidence"]
-    assert evidence["diagnostics"]["mode"] == "hybrid"
+    assert evidence["diagnostics"]["mode"] == "lexical"
     assert evidence["diagnostics"]["lexicalWeight"] == 0.25
     assert evidence["diagnostics"]["k"] == 1
+
+
+def test_hybrid_alias_maps_to_lexical(workspace: Workspace):
+    result = workspace.ask(QUESTION, retrieval_mode="hybrid", generate=False)
+    evidence = result["answer"]["evidence"]
+    assert evidence["diagnostics"]["mode"] == "lexical"
+    assert evidence["diagnostics"]["lexicalWeight"] == 0.25
 
 
 def test_ask_validates_input(workspace: Workspace):
@@ -94,6 +106,7 @@ def test_ask_validates_input(workspace: Workspace):
         workspace.ask("   ")
     with pytest.raises(ValueError, match="retrieval_mode"):
         workspace.ask(QUESTION, retrieval_mode="unknown-mode")
+    workspace.set_planner(lambda question: QueryPlan("evidence", (), (), (question,), "injected", "ok"))
     result = workspace.ask(QUESTION, retrieval_mode="multiquery", generate=False)
     assert result["answer"]["evidence"]["diagnostics"]["mode"] == "multiquery"
     assert result["answer"]["evidence"]["queryPlan"]["queries"][0] == QUESTION
@@ -340,6 +353,8 @@ def test_db_sample_uses_import_db_when_served_sqlite_has_no_claims(tmp_path, mon
     Workspace.from_sample(embedder=HashingEmbedder(), k=1).import_text(
         FERRY_TRANSCRIPT, filename="conv.txt", extract="messages", db_path=imported
     )
+    # Fallback to CONTINUATOR_IMPORT_DB only applies when --db is the default Continuator DB path.
+    monkeypatch.setenv("CONTINUATOR_DB_PATH", str(served))
     monkeypatch.setenv("CONTINUATOR_IMPORT_DB", str(imported))
 
     empty = Workspace.from_sqlite(served, embedder=HashingEmbedder(), k=5)
@@ -389,10 +404,24 @@ def test_iterative_api_mode_does_not_use_the_heuristic_evaluator(workspace: Work
     def boom(*_a, **_k):
         raise AssertionError("heuristic_evaluation must not run on the API path")
 
+    class FakeGenerator:
+        model_name = "fake-reader"
+        systems: list[str] = []
+
+        def generate(self, system, prompt, *, temperature=None, num_predict=None):
+            self.systems.append(system)
+            return json.dumps({"status": "sufficient", "supported_facts": [], "missing_information": "", "next_queries": []})
+
     monkeypatch.setattr("continuator_memory.webapi.evidence_eval.heuristic_evaluation", boom)
+    fake = FakeGenerator()
+    # Through the generator, as the API does by default: set_evaluator would defeat the assertion below.
+    workspace.set_generator(fake)
+    workspace.set_planner(lambda question: QueryPlan("evidence", (), (), (question,), "injected", "ok"))
     result = workspace.ask(QUESTION, retrieval_mode="iterative", generate=False)
     assert result["answer"]["evidence"]["diagnostics"]["mode"] == "iterative"
     assert workspace._evaluator is None
+    assert len(fake.systems) == 1
+    assert result["answer"]["evidence"]["iterativeRounds"][0]["evaluation"]["source"] == "ollama"
 
 
 def test_bprime_without_classifications_fails_clearly(workspace: Workspace):
@@ -411,3 +440,45 @@ def test_bprime_with_an_explicit_path_is_used_as_given(workspace: Workspace, tmp
     workspace.classifications_path = explicit
     evidence = workspace.ask(QUESTION, retrieval_mode="bprime", generate=False)["answer"]["evidence"]
     assert GOLD in evidence["expandedMemoryIds"]
+
+
+def _memory_workspace(metadata: dict) -> Workspace:
+    message = Message("m1", "c1", 0, "user", "I want to learn Rust.", "2024-03-01")
+    conversation = Conversation("c1", (message,), title="c1")
+    claim = Claim("c-1", "The user wants to learn Rust.", Provenance.of(message), metadata=metadata)
+    return Workspace(conversation=conversation, claims=(claim,), classifications_path=None,
+                     embedder=HashingEmbedder(), k=1, sample_id="imported")
+
+
+@pytest.mark.parametrize(
+    ("memory_type", "bucket"),
+    [("preference", "preference"), ("project", "project"), ("event", "event"), ("relationship", "person"),
+     ("goal", "fact"), ("decision", "fact"), ("personal_fact", "fact"), ("procedural", "fact")],
+)
+def test_v1_memory_type_reaches_the_memory_json(memory_type, bucket):
+    row = _memory_workspace({"memory_type": memory_type}).list_memories()[0]
+    assert row["memoryType"] == memory_type
+    assert row["type"] == bucket
+
+
+def test_non_v1_memory_has_no_memory_type():
+    row = _memory_workspace({}).list_memories()[0]
+    assert row["memoryType"] is None
+    assert row["type"] == "fact"
+
+
+class _NoClaimsAtomizer(PassThroughAtomizer):
+    def atomize(self, window, prior=()):
+        return AtomizationResult(ValidatedWindow(window, [], raw=""), "", 0.0)
+
+
+def test_import_with_no_memories_reports_window_counts_and_keeps_workspace(workspace: Workspace, tmp_path):
+    with pytest.raises(ValueError, match=r"no memories \(\d+ of \d+ windows failed"):
+        workspace.import_text(LABELED, filename="conv.txt", extract="memories",
+                              atomizer=_NoClaimsAtomizer(), db_path=tmp_path / "imp.db")
+    assert workspace.health()["sampleId"] == "fixture"
+
+
+def test_default_import_mode_is_messages_not_memories(workspace: Workspace, tmp_path):
+    result = workspace.import_text(LABELED, filename="conv.txt", db_path=tmp_path / "imp.db")
+    assert result["report"]["extract"] == "message_claims"

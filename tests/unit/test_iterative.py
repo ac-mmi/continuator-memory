@@ -119,6 +119,7 @@ def test_max_three_rounds():
 
 def test_baseline_and_multiquery_still_work():
     workspace = Workspace.from_sample(embedder=HashingEmbedder(), k=1)
+    workspace.set_planner(_plan)
     baseline = workspace.ask(QUESTION, retrieval_mode="baseline", generate=False)
     multi = workspace.ask(QUESTION, retrieval_mode="multiquery", generate=False)
     assert baseline["answer"]["evidence"]["diagnostics"]["mode"] == "baseline"
@@ -155,3 +156,28 @@ def test_retrieve_iterative_cuts_to_k():
     )
     assert len(evidence.selection.selected) <= 2
     assert diag["stopReason"] == "sufficient"
+
+
+def test_retrieve_iterative_honors_depth_and_exposes_fused_ranked_ids():
+    workspace = Workspace.from_sample(embedder=HashingEmbedder(), k=2)
+    evidence, diag = retrieve_iterative_evidence(
+        QUESTION,
+        workspace.conversation,
+        workspace.claims,
+        workspace.relations,
+        workspace.embedder(),
+        2,
+        workspace.budget_chars,
+        planner=_plan,
+        evaluator=lambda _q, _ex: _eval("sufficient"),
+        depth=9,
+    )
+    assert diag["perQueryK"] == 9
+    expected: list[str] = []
+    for row in diag["fusedRanking"]:
+        for mid in row["sourceMessageIds"]:
+            if mid not in expected:
+                expected.append(mid)
+    assert diag["rankedMessageIds"] == expected
+    assert len(diag["fusedRanking"]) <= 9
+    assert len(evidence.selection.selected) <= 2

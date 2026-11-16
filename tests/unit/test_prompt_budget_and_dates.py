@@ -196,3 +196,47 @@ def test_longmemeval_dates_now_reach_the_prompt_and_resolve_relative_times():
     ctx = build_answer_context("When?", _evidence(["s001t000"]), conv, seed_ids=[], expanded_ids=[])
     assert "(message date: 20 May 2023)" in ctx.prompt
     assert "last month" in ctx.prompt and "April 2023" in ctx.prompt
+
+
+# ---- question date ----------------------------------------------------------------------------
+
+def _dated_ctx(question_date, **kw):
+    conv = Conversation("c", (Message("s001t000", "c", 0, "user", "I moved to Lisbon last month.",
+                                      "2023/05/20 (Sat) 02:21"),))
+    return build_answer_context("When did I move?", _evidence(["s001t000"]), conv, seed_ids=[], expanded_ids=[],
+                                question_date=question_date, **kw)
+
+
+def test_question_date_reaches_the_prompt_in_message_date_style():
+    ctx = _dated_ctx("2023/06/01 (Thu) 10:00")
+    assert ctx.question_date == "2023/06/01 (Thu) 10:00"
+    assert "\n\nCurrent date: 1 June 2023\nQuestion: When did I move?\nAnswer:" in ctx.prompt
+    assert "(message date: 20 May 2023)" in ctx.prompt  # message timestamps unchanged
+    assert ctx.prompt.index("[s001t000]") < ctx.prompt.index("Current date:")
+
+
+def test_without_a_question_date_the_prompt_is_unchanged():
+    without = _dated_ctx(None)
+    conv = Conversation("c", (Message("s001t000", "c", 0, "user", "I moved to Lisbon last month.",
+                                      "2023/05/20 (Sat) 02:21"),))
+    default = build_answer_context("When did I move?", _evidence(["s001t000"]), conv, seed_ids=[], expanded_ids=[])
+    assert without.prompt == default.prompt and "Current date" not in default.prompt
+    assert _dated_ctx("   ").prompt == default.prompt
+
+
+def test_unparseable_question_date_is_passed_verbatim_not_replaced():
+    ctx = _dated_ctx("sometime in spring")
+    assert "Current date: sometime in spring\n" in ctx.prompt
+    assert str(date.today().year) not in ctx.prompt.split("Current date:")[1].split("\n")[0]
+
+
+def test_question_date_line_is_inside_the_token_budget():
+    long_texts = ["word " * 900 for _ in range(6)]
+    conv = _conversation(long_texts)
+    ids = [m.message_id for m in conv.messages]
+    for ctx_tokens, out_tokens in ((4096, 256), (2048, 512)):
+        ctx = build_answer_context(QUESTION, _evidence(ids), conv, seed_ids=[], expanded_ids=[],
+                                   context_tokens=ctx_tokens, output_tokens=out_tokens,
+                                   question_date="2023/06/01 (Thu) 10:00")
+        assert "Current date: 1 June 2023" in ctx.prompt
+        assert estimated_prompt_tokens(ctx) + out_tokens <= ctx_tokens

@@ -1,0 +1,99 @@
+{
+  "title": "Hard evidence retrieval architecture audit",
+  "mode": "investigation_planning_only",
+  "production_code_changed": false,
+  "models_downloaded": false,
+  "agentic_loop_justified_now": false,
+  "decision": {
+    "biggest_gap": "No evidence-set / hierarchical expansion / multi-evidence objective on the EvidenceUnit path; hard scenarios E–K unevaluated; current prod evidence retrieval is single-pass BM25 + exact-ID.",
+    "agentic_loop_now": "NO",
+    "next_experiment": "Expand synthetic hard-scenario benchmark (~60–100 Q) with exact+supporting+set metrics; re-baseline BM25 only.",
+    "do_not_build_yet": [
+      "LLM detective/agent loop on EvidenceUnits",
+      "Production embeddings for EvidenceUnits",
+      "Production reranker wiring for EvidenceUnits",
+      "Production query rewriting for evidence path",
+      "Graph index on EvidenceUnits",
+      "PDF/OCR/HTML/code adapters as retrieval fix"
+    ]
+  },
+  "current_architecture": {
+    "evidence_path": [
+      "markdown_ingest",
+      "Document",
+      "EvidenceUnit",
+      "heading_ancestry",
+      "char_spans",
+      "BM25_search_evidence",
+      "exact_id_eval"
+    ],
+    "absent_on_evidence_path": [
+      "dense_index",
+      "reranker",
+      "parent_child_expansion",
+      "multi_evidence_set_return",
+      "cross_reference_follow",
+      "iterative_search",
+      "temporal_filters",
+      "contradiction_detection"
+    ],
+    "conversation_path_not_counted_as_universal": [
+      "MemoryRetriever",
+      "multiquery",
+      "iterative_llm_eval",
+      "graph_index_experimental"
+    ],
+    "phase2_baseline": {
+      "questions": 40,
+      "success": 37,
+      "ranking_cutoff": 2,
+      "retrieval_miss": 1,
+      "mrr": 0.879,
+      "recall_at_5": 0.925,
+      "mechanisms": {
+        "RANKING_LEXICAL_FAILURE": 2,
+        "GOLD_GRANULARITY_FAILURE": 1
+      }
+    }
+  },
+  "scenario_verdicts": [
+    {"id": "A", "name": "direct_lookup", "verdict": "SUPPORTED_NOW", "failure_layer": null, "missing": "regression_only"},
+    {"id": "B", "name": "paraphrase_terminology", "verdict": "PARTIALLY_SUPPORTED", "failure_layer": "representation+ranking", "missing": "measured_dense_or_rank_ablation"},
+    {"id": "C", "name": "competing_related_sections", "verdict": "PARTIALLY_SUPPORTED", "failure_layer": "ranking", "missing": "structure_aware_rank_or_set"},
+    {"id": "D", "name": "granularity_mismatch", "verdict": "PARTIALLY_SUPPORTED", "failure_layer": "granularity+evaluation", "missing": "parent_sibling_expand+supporting_metrics"},
+    {"id": "E", "name": "distributed_evidence", "verdict": "UNSUPPORTED", "failure_layer": "candidate_generation+evaluation", "missing": "multi_id_gold+set_metrics"},
+    {"id": "F", "name": "cross_reference", "verdict": "UNSUPPORTED", "failure_layer": "iterative_cg", "missing": "deterministic_ref_follow"},
+    {"id": "G", "name": "multi_hop", "verdict": "UNSUPPORTED", "failure_layer": "iterative_cg", "missing": "budgeted_iteration"},
+    {"id": "H", "name": "ambiguous_hypotheses", "verdict": "UNSUPPORTED", "failure_layer": "query_interpretation", "missing": "multi_hypothesis_union"},
+    {"id": "I", "name": "negative_absence", "verdict": "UNSUPPORTED", "failure_layer": "evaluation_policy", "missing": "insufficient_evidence_protocol"},
+    {"id": "J", "name": "temporal_versioned", "verdict": "UNSUPPORTED", "failure_layer": "indexing_metadata", "missing": "effective_time_fields"},
+    {"id": "K", "name": "contradictory", "verdict": "UNSUPPORTED", "failure_layer": "cg+evaluation", "missing": "forced_multi_source"},
+    {"id": "L", "name": "large_document_navigation", "verdict": "UNKNOWN_NOT_YET_EVALUATED", "failure_layer": "hierarchical_cg", "missing": "doc_then_local_search"}
+  ],
+  "architecture_options": {
+    "A_single_pass": {"recommend_now_as_baseline": true, "sufficient_for_vision": false},
+    "B_multistage_deterministic": {"recommend_after_hard_benchmark": true, "includes": ["rerank_or_score", "parent_child_expand", "evidence_set"]},
+    "C_deterministic_iterative": {"recommend_after_B_ceiling": true, "includes": ["ref_extract", "second_search", "fuse"]},
+    "D_llm_agent": {"recommend_now": false, "condition": "only_after_C_fails_measured_hard_cases"}
+  },
+  "levels": [
+    {"level": 1, "name": "direct", "status": "exists"},
+    {"level": 2, "name": "paraphrase", "status": "partial_measure_next"},
+    {"level": 3, "name": "competition", "status": "partial"},
+    {"level": 4, "name": "hierarchical", "status": "structure_ready_expand_missing"},
+    {"level": 5, "name": "multi_evidence", "status": "missing"},
+    {"level": 6, "name": "crossref_multihop", "status": "missing"}
+  ],
+  "roadmap": {
+    "NOW": "hard_scenario_benchmark_plus_exact_supporting_set_metrics_bm25_rebaseline",
+    "NEXT": "option_B_parent_sibling_expand_and_offline_rank_repr_ablation",
+    "LATER": ["dense_evidence_index", "ce_rerank", "option_C_ref_follow", "option_D_llm_if_needed", "more_source_adapters", "temporal_contradiction"]
+  },
+  "evaluation_modes_proposed": [
+    "exact_evidence",
+    "supporting_evidence",
+    "multi_evidence_coverage",
+    "partial_evidence",
+    "evidence_sufficiency_deterministic"
+  ]
+}

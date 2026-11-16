@@ -145,10 +145,13 @@ class SourceEvidence:
 
 
 def memory_index(embedder: Embedder, conversation_id: str, claims: Iterable[Claim],
-                 relations: Iterable[Relation] = (), config: RetrievalConfig | None = None) -> MemoryRetriever:
-    """The V2 memory index exactly as Phase 4 builds it: consolidate the claims, index the consolidator."""
+                 relations: Iterable[Relation] = (), config: RetrievalConfig | None = None,
+                 consolidator=None) -> MemoryRetriever:
+    """Build a memory index from a consolidator (preferred) or by consolidating claims."""
     retriever = MemoryRetriever(embedder, config or RetrievalConfig())
-    retriever.index_consolidator(consolidate(conversation_id, claims, relations))
+    if consolidator is None:
+        consolidator = consolidate(conversation_id, claims, relations)
+    retriever.index_consolidator(consolidator)
     return retriever
 
 
@@ -377,17 +380,47 @@ def retrieve_source_evidence(
     budget_chars: int,
     config: RetrievalConfig | None = None,
     bprime: BPrimeConfig | None = None,
+    consolidator=None,
+    *,
+    contextual_enrichment: bool = False,
 ) -> SourceEvidence:
     """Retrieve memories, optionally expand via B′, then budget sources.
+
+    Pass a preloaded ``consolidator`` (typically from ``MemoryStore``) to avoid re-running
+    consolidation. When omitted, claims are consolidated in memory as before.
 
     When ``bprime`` is None or disabled, the classifier file is not read and behaviour
     matches the pre-B′ Arm A path (seed matches only). When enabled with ``max_hops=1``
     (default ``--bprime``), only seed neighbours are appended. With ``max_hops=2``
     (``--bprime-two-hop``), hop-1 expansions are also expanded once; depth is fixed.
+
+    ``contextual_enrichment`` indexes ephemeral ±1 same-session context text (Option B) while
+    keeping ``MemorySource`` identity on the target message only.
     """
-    consolidator = consolidate(conversation.conversation_id, claims, relations)
-    retriever = MemoryRetriever(embedder, config or RetrievalConfig())
-    retriever.index_consolidator(consolidator)
+    if consolidator is None:
+        consolidator = consolidate(conversation.conversation_id, claims, relations)
+    resolved = config or RetrievalConfig()
+    if contextual_enrichment:
+        from dataclasses import replace as dc_replace
+
+        from continuator_memory.v2.contextual_units import memories_with_contextual_retrieval_text
+
+        # Clean Option B: enriched indexed text only; no dual-vector context_weight path.
+        resolved = dc_replace(resolved, context_weight=0.0)
+        retriever = MemoryRetriever(embedder, resolved)
+        enriched = memories_with_contextual_retrieval_text(
+            conversation, consolidator.memories.values(),
+        )
+        retriever.index(
+            enriched,
+            consolidator.sources,
+            consolidator.links,
+            consolidator.conversation_id,
+            contexts=None,
+        )
+    else:
+        retriever = MemoryRetriever(embedder, resolved)
+        retriever.index_consolidator(consolidator)
     outcome = retriever.search(question, k, conversation.conversation_id)
     seed_matches = tuple(resolve(r, conversation) for r in outcome.results)
     n_seeds = len(seed_matches)

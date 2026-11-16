@@ -142,7 +142,12 @@ def test_v1_tables_unchanged_by_v2_schema(store):
     before = {row[0] for row in store.connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     pipeline(store)
     after = {row[0] for row in store.connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    assert after - before == {"v2_semantic_messages", "v2_claims", "v2_relations", "v2_atomization_log"}
+    # Semantic claim tables plus the consolidated memory snapshot (product persistence).
+    assert after - before == {
+        "v2_semantic_messages", "v2_claims", "v2_relations", "v2_atomization_log",
+        "v2_memories", "v2_memory_sources", "v2_memory_versions", "v2_memory_decisions",
+    }
+    assert before <= after
 
 
 # ---- prompt -----------------------------------------------------------------

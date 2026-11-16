@@ -1,0 +1,378 @@
+.scroll {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.page,
+.pageNarrow {
+  margin: 0 auto;
+  padding: 40px 32px 80px;
+}
+
+.page {
+  max-width: 1120px;
+}
+
+.pageNarrow {
+  max-width: 800px;
+}
+
+.pageIntro {
+  margin-bottom: 28px;
+}
+
+.pageTitle {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.pageText {
+  margin-top: 6px;
+  max-width: 560px;
+  color: var(--text-secondary);
+}
+
+.muted {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-subtle);
+}
+
+.segment,
+.segmentActive {
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-size: 13px;
+  color: var(--text-secondary);
+  transition:
+    background-color var(--duration) var(--ease),
+    color var(--duration) var(--ease);
+}
+
+.segment:hover {
+  color: var(--text);
+}
+
+.segmentActive {
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 500;
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.cardGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.list {
+  display: grid;
+  gap: 10px;
+}
+
+.backLink {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+}
+
+.backLink:hover {
+  background: var(--bg-subtle);
+  color: var(--text);
+}
+
+.crumbs {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.crumbs a {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.crumbs a:hover {
+  color: var(--text);
+}
+
+.crumbs svg {
+  flex: none;
+  color: var(--text-muted);
+}
+
+.crumbs span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.textLink {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--blue);
+}
+
+/* Graph page */
+
+.graphPage {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.graphLoading {
+  flex: 1;
+  background: var(--canvas);
+}
+
+.graphBody {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.graphPanel,
+.graphPanelOpen {
+  flex: none;
+  width: 320px;
+  padding: 20px;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+  overflow-y: auto;
+}
+
+.graphPanelEmpty {
+  display: grid;
+  gap: 6px;
+}
+
+.graphPanelHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.graphPanelTitle {
+  margin-top: 4px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.graphPanelStatement {
+  margin-top: 8px;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.graphPanelMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  margin-top: 14px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.primaryButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 34px;
+  margin-top: 18px;
+  padding: 0 12px;
+  border-radius: var(--radius);
+  background: var(--blue);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  transition: background-color var(--duration) var(--ease);
+}
+
+.primaryButton:hover {
+  background: var(--blue-hover);
+}
+
+.iconButton {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.iconButton:hover {
+  background: var(--bg-subtle);
+  color: var(--text);
+}
+
+.panelSection {
+  margin-top: 28px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.connectionList {
+  display: grid;
+  gap: 2px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.connection {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: calc(100% + 16px);
+  margin: 0 -8px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  text-align: left;
+  transition: background-color var(--duration) var(--ease);
+}
+
+.connection:hover {
+  background: var(--bg-subtle);
+}
+
+.connectionLabel {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.connectionTarget {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* Settings */
+
+.settingsSection {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 24px;
+  padding: 24px 0;
+  border-top: 1px solid var(--border);
+}
+
+.settingsTitle {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.settingsRows {
+  display: grid;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.settingsRows > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  font-size: 13px;
+}
+
+.settingsRows > div + div {
+  border-top: 1px solid var(--border);
+}
+
+.settingsRows dt {
+  color: var(--text-secondary);
+}
+
+.settingsRows dd {
+  margin: 0;
+  font-weight: 500;
+  text-align: right;
+}
+
+@media (max-width: 1024px) {
+  .graphPanel {
+    display: none;
+  }
+
+  .graphPanelOpen {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    bottom: 12px;
+    width: min(320px, calc(100% - 24px));
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-pop);
+  }
+}
+
+@media (max-width: 640px) {
+  .page,
+  .pageNarrow {
+    padding: 24px 16px 56px;
+  }
+
+  .pageTitle {
+    font-size: 19px;
+  }
+
+  .cardGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .graphPanelOpen {
+    top: auto;
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    width: auto;
+    max-height: 55%;
+  }
+
+  .settingsSection {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+}

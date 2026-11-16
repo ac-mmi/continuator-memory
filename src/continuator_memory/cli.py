@@ -13,23 +13,128 @@ from continuator_memory.models import ParseError, RetrievedChunk, load_conversat
 from continuator_memory.pipeline import Pipeline
 from continuator_memory.store import Store
 
-MEMORY_HELP = "Phase 3: use memory formation / memory-aware retrieval"
+MEMORY_HELP = (
+    "legacy Phase 3 SPO memory (research only; product path is V2 + webapi — see ARCHITECTURE.md)"
+)
+
+
+_CLI_EPILOG = """
+product HTTP API (recommended):
+  serve                 start product API: /import, /context, /documents, /evidence, …
+  Conversation import is HTTP/SDK only while serve is running
+    POST /import  or  ContinuatorClient.import_conversation(...)
+  Prefer HTTP/SDK Markdown ingest while the server is running
+    POST /documents/ingest  or  ContinuatorClient.ingest_markdown(...)
+
+product document CLI (offline / server stopped; writes CONTINUATOR_DB_PATH):
+  ingest-markdown | ingest-html | ingest-docx | ingest-pdf | ingest-file
+  search-evidence
+
+research / legacy (Phase 1 chunk RAG — not the Context Pack product API):
+  ingest | retrieve | ask
+""".strip()
 
 
 def _build_parser(settings: Settings) -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="continuator-memory")
+    parser = argparse.ArgumentParser(
+        prog="continuator-memory",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_CLI_EPILOG,
+    )
     parser.add_argument(
         "--db", default=str(settings.db_path), help=f"SQLite path (default: {settings.db_path})"
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_ingest = sub.add_parser("ingest", help="ingest a conversation JSON file")
+    # --- Product commands first (help listing order) ---
+    p_serve = sub.add_parser(
+        "serve",
+        help=(
+            "product HTTP API: import, Context Pack (/context), documents/evidence "
+            "(default: fixture demo corpus until POST /import)"
+        ),
+        description=(
+            "Start the product HTTP API (import, Context Pack /context, documents/evidence). "
+            "Without --sample, auto-reopens CONTINUATOR_DB_PATH when it has an imported corpus; "
+            "otherwise starts the fixture demo. Use --sample fixture to force the demo."
+        ),
+    )
+    p_serve.add_argument("--host", default="127.0.0.1")
+    p_serve.add_argument("--port", type=int, default=8765)
+    p_serve.add_argument(
+        "--sample",
+        choices=("fixture", "db"),
+        default=None,
+        help=(
+            "fixture = built-in demo; db = open CONTINUATOR_DB_PATH/--db; "
+            "omit to auto-reopen a usable product DB, else fixture"
+        ),
+    )
+    p_serve.add_argument("--classifications", help="B′ classifications JSONL (needed for db + B′)")
+    p_serve.add_argument("-c", "--conversation", help="SQLite conversation id when --sample db")
+    p_serve.add_argument("-k", "--top-k", type=int, help="retrieval cutoff (fixture default: 1)")
+
+    p_md = sub.add_parser(
+        "ingest-markdown",
+        help="product: ingest Markdown into EvidenceUnits (offline; prefer HTTP/SDK while serve runs)",
+    )
+    p_md.add_argument("path", help="path to a .md file")
+    p_md.add_argument("--json", action="store_true", help="emit JSON")
+
+    p_html = sub.add_parser(
+        "ingest-html",
+        help="product: ingest HTML into EvidenceUnits (offline; prefer HTTP/SDK while serve runs)",
+    )
+    p_html.add_argument("path", help="path to an .html file")
+    p_html.add_argument("--json", action="store_true", help="emit JSON")
+
+    p_docx = sub.add_parser(
+        "ingest-docx",
+        help="product: ingest DOCX into EvidenceUnits (offline; prefer HTTP/SDK while serve runs)",
+    )
+    p_docx.add_argument("path", help="path to a .docx file")
+    p_docx.add_argument("--json", action="store_true", help="emit JSON")
+
+    p_pdf = sub.add_parser(
+        "ingest-pdf",
+        help="product: ingest digital-text PDF into EvidenceUnits (offline)",
+    )
+    p_pdf.add_argument("path", help="path to a .pdf file")
+    p_pdf.add_argument("--json", action="store_true", help="emit JSON")
+
+    p_file = sub.add_parser(
+        "ingest-file",
+        help="product: ingest .md/.html/.docx/.pdf by extension (offline)",
+    )
+    p_file.add_argument("path", help="path to a supported evidence file")
+    p_file.add_argument("--json", action="store_true", help="emit JSON")
+
+    p_ev = sub.add_parser(
+        "search-evidence",
+        help="product: BM25 search over EvidenceUnits (offline; no embedding download)",
+    )
+    p_ev.add_argument("question")
+    p_ev.add_argument("-k", "--top-k", type=int, default=10)
+    p_ev.add_argument("--document", help="restrict to one document_id")
+    p_ev.add_argument("--json", action="store_true", help="emit JSON")
+
+    # --- Research / legacy Phase 1 ---
+    p_ingest = sub.add_parser(
+        "ingest",
+        help="research/legacy Phase 1: ingest conversation JSON into chunk RAG store (not POST /import)",
+    )
     p_ingest.add_argument("path")
     p_ingest.add_argument("--memory", action="store_true", help=MEMORY_HELP)
 
     for name, help_text in (
-        ("retrieve", "show the top-k chunks retrieved for a question"),
-        ("ask", "answer a question using retrieved chunks and Ollama"),
+        (
+            "retrieve",
+            "research/legacy Phase 1: retrieve chunks (not product Context Pack /context)",
+        ),
+        (
+            "ask",
+            "research/legacy Phase 1: answer from chunks via Ollama (not product POST /ask)",
+        ),
     ):
         p = sub.add_parser(name, help=help_text)
         p.add_argument("question")
@@ -43,7 +148,8 @@ def _build_parser(settings: Settings) -> argparse.ArgumentParser:
             )
 
     p_eval = sub.add_parser(
-        "evaluate", help="run a benchmark dataset against a fresh in-memory index"
+        "evaluate",
+        help="research: run a benchmark dataset against a fresh in-memory index",
     )
     p_eval.add_argument("dataset", help="benchmark dataset JSON")
     p_eval.add_argument(
@@ -59,25 +165,13 @@ def _build_parser(settings: Settings) -> argparse.ArgumentParser:
     p_eval.add_argument("--limit", type=int, help="evaluate only the first N questions")
     p_eval.add_argument("--memory", action="store_true", help=MEMORY_HELP)
 
-    p_mem = sub.add_parser("memories", help="show stored memories and relationships (Phase 3)")
+    p_mem = sub.add_parser(
+        "memories",
+        help="research/legacy Phase 3 SPO memories/relationships (not the V2 product store)",
+    )
     p_mem.add_argument("-c", "--conversation", help="restrict to one conversation ID")
     p_mem.add_argument("--current-only", action="store_true", help="hide superseded records")
     p_mem.add_argument("--json", action="store_true", help="emit JSON")
-
-    p_serve = sub.add_parser(
-        "serve", help="HTTP API for the web UI (no extraction; default sample fixture)"
-    )
-    p_serve.add_argument("--host", default="127.0.0.1")
-    p_serve.add_argument("--port", type=int, default=8765)
-    p_serve.add_argument(
-        "--sample",
-        choices=("fixture", "db"),
-        default="fixture",
-        help="fixture = built-in 6-message sample; db = existing SQLite",
-    )
-    p_serve.add_argument("--classifications", help="B′ classifications JSONL (needed for db + B′)")
-    p_serve.add_argument("-c", "--conversation", help="SQLite conversation id when --sample db")
-    p_serve.add_argument("-k", "--top-k", type=int, help="retrieval cutoff (fixture default: 1)")
     return parser
 
 
@@ -195,6 +289,144 @@ def _memories(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_ingest_result(result, *, db: str, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(result.to_dict(), indent=2))
+        return
+    action = "replaced" if result.replaced else "ingested"
+    print(
+        f"{action} document '{result.document.document_id}' "
+        f"({result.document.source_uri}): {len(result.units)} evidence units "
+        f"(db: {db})"
+    )
+    for unit in result.units:
+        path = " > ".join(unit.heading_path) if unit.heading_path else "(preamble)"
+        print(f"  {unit.evidence_id}  [{path}]")
+
+
+def _ingest_markdown(args: argparse.Namespace) -> int:
+    from continuator_memory.evidence import EvidenceStore, ingest_markdown
+    from continuator_memory.store import Store as ProductStore
+
+    # Share the product SQLite file so evidence tables sit beside conversations.
+    with ProductStore(args.db) as product:
+        store = EvidenceStore(product.connection)
+        try:
+            result = ingest_markdown(args.path, store)
+        except OSError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        _print_ingest_result(result, db=args.db, as_json=args.json)
+    return 0
+
+
+def _ingest_html(args: argparse.Namespace) -> int:
+    from continuator_memory.evidence import EvidenceStore, ingest_html
+    from continuator_memory.store import Store as ProductStore
+
+    with ProductStore(args.db) as product:
+        store = EvidenceStore(product.connection)
+        try:
+            result = ingest_html(args.path, store)
+        except OSError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        _print_ingest_result(result, db=args.db, as_json=args.json)
+    return 0
+
+
+def _ingest_docx(args: argparse.Namespace) -> int:
+    from continuator_memory.evidence import EvidenceStore, ingest_docx
+    from continuator_memory.store import Store as ProductStore
+
+    with ProductStore(args.db) as product:
+        store = EvidenceStore(product.connection)
+        try:
+            result = ingest_docx(args.path, store)
+        except OSError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        _print_ingest_result(result, db=args.db, as_json=args.json)
+    return 0
+
+
+def _ingest_pdf(args: argparse.Namespace) -> int:
+    from continuator_memory.evidence import EvidenceStore, ingest_pdf
+    from continuator_memory.evidence.adapters.pdf import PDFNoExtractableTextError
+    from continuator_memory.store import Store as ProductStore
+
+    with ProductStore(args.db) as product:
+        store = EvidenceStore(product.connection)
+        try:
+            result = ingest_pdf(args.path, store)
+        except OSError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        except PDFNoExtractableTextError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        _print_ingest_result(result, db=args.db, as_json=args.json)
+    return 0
+
+
+def _ingest_file(args: argparse.Namespace) -> int:
+    from continuator_memory.evidence import (
+        EvidenceStore,
+        UnsupportedEvidenceFormatError,
+        ingest_file,
+    )
+    from continuator_memory.evidence.adapters.pdf import PDFNoExtractableTextError
+    from continuator_memory.store import Store as ProductStore
+
+    with ProductStore(args.db) as product:
+        store = EvidenceStore(product.connection)
+        try:
+            result = ingest_file(args.path, store)
+        except OSError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        except UnsupportedEvidenceFormatError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        except PDFNoExtractableTextError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        _print_ingest_result(result, db=args.db, as_json=args.json)
+    return 0
+
+
+def _search_evidence(args: argparse.Namespace) -> int:
+    from continuator_memory.evidence import EvidenceStore, search_evidence
+    from continuator_memory.store import Store as ProductStore
+
+    with ProductStore(args.db) as product:
+        store = EvidenceStore(product.connection)
+        hits = search_evidence(
+            store,
+            args.question,
+            top_k=args.top_k,
+            document_id=args.document,
+        )
+        if args.json:
+            print(json.dumps([h.to_dict() for h in hits], indent=2))
+            return 0
+        if not hits:
+            print("(no evidence units matched)")
+            return 0
+        for hit in hits:
+            path = " > ".join(hit.unit.heading_path) if hit.unit.heading_path else "(preamble)"
+            print(
+                f"#{hit.rank}  score={hit.score:.4f}  evidence={hit.unit.evidence_id}  "
+                f"document={hit.document.document_id}"
+            )
+            print(f"    source: {hit.document.source_uri}")
+            print(f"    section: {path}  ({hit.unit.section_id})")
+            for line in hit.unit.text.splitlines() or [hit.unit.text]:
+                print(f"    | {line}")
+            print()
+    return 0
+
+
 def _f(value: float | None) -> str:
     return "n/a" if value is None else f"{value:.3f}"
 
@@ -232,6 +464,18 @@ def main(argv: list[str] | None = None) -> int:
             k=args.top_k,
         )
         return 0
+    if args.command == "ingest-markdown":
+        return _ingest_markdown(args)
+    if args.command == "ingest-html":
+        return _ingest_html(args)
+    if args.command == "ingest-docx":
+        return _ingest_docx(args)
+    if args.command == "ingest-pdf":
+        return _ingest_pdf(args)
+    if args.command == "ingest-file":
+        return _ingest_file(args)
+    if args.command == "search-evidence":
+        return _search_evidence(args)
 
     with Store(args.db) as store:
         pipeline = _build_pipeline(store, settings, args.memory)

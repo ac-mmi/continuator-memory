@@ -1,0 +1,296 @@
+{
+  "title": "Adaptive Evidence Retrieval — Architecture Audit & Gap Analysis",
+  "mode": "audit_only",
+  "production_behavior_changed": false,
+  "adaptive_architecture_implemented": false,
+  "full_evaluation_run": false,
+  "stacks": {
+    "universal_evidence": {
+      "atom": "EvidenceUnit",
+      "root": "src/continuator_memory/evidence/"
+    },
+    "conversation_memory": {
+      "atom": "Memory / message",
+      "root": "src/continuator_memory/v2/ + webapi/"
+    }
+  },
+  "production_pipeline": {
+    "evidence_unit_path": {
+      "flow": [
+        "ingest/adapters",
+        "Document + EvidenceUnit",
+        "EvidenceStore",
+        "search_evidence()",
+        "BM25Index.search()",
+        "list[EvidenceHit]",
+        "Top-K truncation"
+      ],
+      "modules": {
+        "models": "src/continuator_memory/evidence/models.py",
+        "search": "src/continuator_memory/evidence/search.py",
+        "bm25": "src/continuator_memory/v2/bm25.py",
+        "store": "src/continuator_memory/evidence/store.py"
+      },
+      "absent": [
+        "dense EvidenceUnit search",
+        "EvidenceUnit cross-encoder",
+        "EvidenceUnit hybrid union",
+        "set-aware selection",
+        "EvidenceUnit sufficiency",
+        "adaptive strategy selection"
+      ]
+    },
+    "conversation_memory_path": {
+      "entry": "src/continuator_memory/webapi/workspace.py::_retrieve_evidence",
+      "modes_include": [
+        "baseline",
+        "lexical",
+        "multiquery",
+        "iterative",
+        "lexical_semantic_rrf",
+        "lexical_multiquery_rrf",
+        "contextual_*_rerank",
+        "contextual_wide_union_*"
+      ],
+      "key_modules": {
+        "multiquery": "src/continuator_memory/webapi/multiquery.py",
+        "iterative": "src/continuator_memory/webapi/iterative.py",
+        "evidence_eval": "src/continuator_memory/webapi/evidence_eval.py",
+        "hybrid_rrf": "src/continuator_memory/webapi/hybrid_rrf.py",
+        "hybrid_retriever": "src/continuator_memory/v2/hybrid_retrieval.py",
+        "rerank": "src/continuator_memory/v2/rerank.py",
+        "query_plan": "src/continuator_memory/webapi/query_plan.py"
+      },
+      "note": "Adaptive-ish iterative/multiquery/CE modes operate on memories/messages, not EvidenceUnits."
+    }
+  },
+  "benchmark_pipelines": {
+    "scifact": {
+      "flow": [
+        "claim + EvidenceUnits",
+        "BM25 and/or dense",
+        "optional RRF / union",
+        "rerank_fixed_pool + CrossEncoderReranker",
+        "Top-K metrics"
+      ],
+      "modules": [
+        "benchmarks/evidence_retrieval/scifact/semantic_rank.py",
+        "benchmarks/evidence_retrieval/scifact/semantic_corpus_index.py",
+        "benchmarks/evidence_retrieval/scifact/rrf.py",
+        "benchmarks/evidence_retrieval/scifact/union_cross_encoder_rerank.py",
+        "benchmarks/evidence_retrieval/scifact/held_out_ablation.py"
+      ]
+    },
+    "hotpotqa": {
+      "flow": [
+        "materialize_example",
+        "resolve_supporting_facts",
+        "bm25_rank_closed_pool",
+        "dense_rank_closed_pool",
+        "dedup_union",
+        "rerank_fixed_pool",
+        "multi-evidence metrics"
+      ],
+      "modules": [
+        "benchmarks/evidence_retrieval/hotpotqa/adapter.py",
+        "benchmarks/evidence_retrieval/hotpotqa/gold.py",
+        "benchmarks/evidence_retrieval/hotpotqa/scoring.py",
+        "benchmarks/evidence_retrieval/hotpotqa/bm25_baseline.py",
+        "benchmarks/evidence_retrieval/hotpotqa/semantic_baseline.py",
+        "benchmarks/evidence_retrieval/hotpotqa/union_baseline.py",
+        "benchmarks/evidence_retrieval/hotpotqa/union_ce_rerank.py",
+        "benchmarks/evidence_retrieval/hotpotqa/diagnose_union_ce_failures.py"
+      ],
+      "failure_locus": "evidence_set_selection_after_independent_ce_topk_truncation"
+    },
+    "hierarchical": {
+      "result": "Flat ∪ hierarchy added no unique gold; hierarchy not justified as production candidate channel",
+      "modules": [
+        "benchmarks/evidence_retrieval/hierarchical_dse/",
+        "benchmarks/evidence_retrieval/hierarchical_union/"
+      ]
+    }
+  },
+  "capabilities": [
+    {"id": 1, "name": "BM25 retrieval", "status": "EXISTS_AND_USED", "refs": ["evidence/search.py", "v2/bm25.py"]},
+    {"id": 2, "name": "Dense retrieval", "status": "PARTIALLY_EXISTS", "refs": ["v2/memory_retrieval.py", "scifact/semantic_rank.py", "hotpotqa/semantic_baseline.py"], "note": "Production dense is memory-side; EvidenceUnit dense is experiment-only"},
+    {"id": 3, "name": "Hybrid candidate union", "status": "EXISTS_BUT_EXPERIMENT_ONLY", "refs": ["hotpotqa/union_baseline.py", "webapi/contextual_union_rerank.py"]},
+    {"id": 4, "name": "RRF fusion", "status": "EXISTS_AND_USED", "refs": ["v2/hybrid_retrieval.py", "webapi/multiquery.py", "scifact/rrf.py"], "note": "Used on memory/hybrid paths; SciFact EU experiment; not HotpotQA CE path"},
+    {"id": 5, "name": "Cross-encoder reranking", "status": "EXISTS_AND_USED", "refs": ["v2/rerank.py", "webapi/contextual_*.py", "scifact/union_cross_encoder_rerank.py", "hotpotqa/union_ce_rerank.py"], "note": "EvidenceUnit CE is experiment-only"},
+    {"id": 6, "name": "Fixed Top-K truncation", "status": "EXISTS_AND_USED", "refs": ["search top_k callers", "hotpotqa metrics @K"]},
+    {"id": 7, "name": "Evidence identity preservation", "status": "EXISTS_AND_USED", "refs": ["evidence/models.py", "hotpotqa/adapter.py"]},
+    {"id": 8, "name": "Multi-evidence representation", "status": "PARTIALLY_EXISTS", "refs": ["hotpotqa/scoring.py", "hotpotqa/gold.py"]},
+    {"id": 9, "name": "Evidence-set coverage tracking", "status": "EXISTS_BUT_EXPERIMENT_ONLY", "refs": ["hotpotqa/scoring.py", "union_ce_failure_diagnosis"]},
+    {"id": 10, "name": "Evidence sufficiency assessment", "status": "PARTIALLY_EXISTS", "refs": ["webapi/evidence_eval.py", "webapi/iterative.py"], "note": "Conversation iterative LLM/heuristic; not EvidenceUnit HotpotQA"},
+    {"id": 11, "name": "Query decomposition", "status": "PARTIALLY_EXISTS", "refs": ["webapi/query_plan.py"]},
+    {"id": 12, "name": "Query rewriting", "status": "PARTIALLY_EXISTS", "refs": ["webapi/query_plan.py", "webapi/evidence_eval.py"]},
+    {"id": 13, "name": "Multi-query retrieval", "status": "EXISTS_AND_USED", "refs": ["webapi/multiquery.py"]},
+    {"id": 14, "name": "Iterative retrieval", "status": "EXISTS_AND_USED", "refs": ["webapi/iterative.py"]},
+    {"id": 15, "name": "Retrieval conditioned on selected evidence", "status": "PARTIALLY_EXISTS", "refs": ["webapi/iterative.py"], "note": "Follow-up queries from evaluator; no EU uncovered-fact search API"},
+    {"id": 16, "name": "Set-aware reranking", "status": "DOES_NOT_EXIST", "refs": []},
+    {"id": 17, "name": "Diversity/MMR selection", "status": "DOES_NOT_EXIST", "refs": ["webapi/contextual_wide_union_rerank.py::reduce_by_channel_quota"], "note": "Channel quota is partial analogue only"},
+    {"id": 18, "name": "Adaptive strategy selection", "status": "DOES_NOT_EXIST", "refs": []},
+    {"id": 19, "name": "Stop/continue decision logic", "status": "PARTIALLY_EXISTS", "refs": ["webapi/iterative.py STOP_*"]},
+    {"id": 20, "name": "Contradiction detection", "status": "PARTIALLY_EXISTS", "refs": ["v2 memory consolidation / contradicted fields"]},
+    {"id": 21, "name": "Evidence relationship classification", "status": "DOES_NOT_EXIST", "refs": []},
+    {"id": 22, "name": "Multi-hop reasoning support", "status": "DOES_NOT_EXIST", "refs": ["hotpotqa baselines explicitly unordered multi-evidence"]},
+    {"id": 23, "name": "Per-question retrieval state", "status": "PARTIALLY_EXISTS", "refs": ["iterative rounds diagnostics", "hotpotqa per-example JSON"]}
+  ],
+  "reusable_components": [
+    {"name": "EvidenceUnit/Document/EvidenceHit", "path": "src/continuator_memory/evidence/models.py", "action": "reuse_directly"},
+    {"name": "search_evidence / BM25Index", "path": "evidence/search.py + v2/bm25.py", "action": "reuse_directly"},
+    {"name": "CrossEncoderReranker", "path": "src/continuator_memory/v2/rerank.py", "action": "reuse_directly"},
+    {"name": "rerank_fixed_pool", "path": "benchmarks/.../scifact/union_cross_encoder_rerank.py", "action": "reuse_in_experiments"},
+    {"name": "LocalSentenceEmbedder", "path": "benchmarks/.../scifact/semantic_rank.py", "action": "reuse_in_experiments"},
+    {"name": "HotpotQA gold + scoring", "path": "benchmarks/.../hotpotqa/{gold,scoring}.py", "action": "reuse_in_experiments"},
+    {"name": "dedup_union", "path": "benchmarks/.../hotpotqa/union_baseline.py", "action": "reuse_in_experiments"},
+    {"name": "RRF helpers", "path": "webapi/multiquery.py + v2/hybrid_retrieval.py + scifact/rrf.py", "action": "reuse_as_primitives"},
+    {"name": "Memory iterative sufficiency", "path": "webapi/iterative.py + evidence_eval.py", "action": "do_not_auto_port_to_EU; different problem"}
+  ],
+  "missing_layers": [
+    {
+      "name": "EvidenceCandidatePool",
+      "priority": 1,
+      "scope": "benchmark_first",
+      "purpose": "Explicit frozen EU candidate set with optional channel scores"
+    },
+    {
+      "name": "EvidenceSelectionState",
+      "priority": 2,
+      "scope": "benchmark_first",
+      "purpose": "selected_ids, remaining_pool, simple novelty/coverage proxies"
+    },
+    {
+      "name": "SetAwareSelector",
+      "priority": 1,
+      "scope": "benchmark_first",
+      "purpose": "Select covering Top-K from frozen pool using CE scores + novelty; addresses HotpotQA CE coverage failures",
+      "variants": ["greedy_mmr_like", "iterative_novelty_downweight", "later_evidence_conditioned_ce"]
+    },
+    {
+      "name": "CoverageAssessment",
+      "priority": 2,
+      "scope": "benchmark_oracle_first",
+      "purpose": "HotpotQA: gold All-Found; product proxies only after proof"
+    },
+    {
+      "name": "General StrategySelector",
+      "priority": 99,
+      "scope": "defer",
+      "purpose": "Do not build multi-strategy adaptive controller before set-aware selection milestone"
+    }
+  ],
+  "layer_separation": {
+    "retrieval": "Find candidates",
+    "independent_ranking": "Order by standalone (query, passage) relevance",
+    "evidence_set_selection": "Choose covering subset under budget K",
+    "sufficiency": "Decide whether to stop",
+    "reasoning_answer": "Use evidence to answer",
+    "hotpotqa_failure_layer": "evidence_set_selection",
+    "hotpotqa_failure_detail": "Pool-complete examples lose required golds under independent CE Top-10 truncation"
+  },
+  "experimental_findings": [
+    {
+      "id": 1,
+      "finding": "SciFact hybrid retrieval",
+      "proves": "BM25 and dense are complementary for single-evidence candidates",
+      "implication": "Keep hybrid candidate generation in EU experiments",
+      "justifies_architecture_change": true,
+      "scope": "experiment"
+    },
+    {
+      "id": 2,
+      "finding": "SciFact CE reranking",
+      "proves": "Independent CE improves single-evidence ranking on fixed pools",
+      "implication": "CE is necessary but not sufficient for multi-evidence set coverage",
+      "justifies_architecture_change": true,
+      "scope": "experiment"
+    },
+    {
+      "id": 3,
+      "finding": "SciFact terminology mismatch",
+      "proves": "Some misses are vocab/label issues, not ranker bugs",
+      "implication": "Separate retrieval diagnosis from dataset alignment",
+      "justifies_architecture_change": false
+    },
+    {
+      "id": 4,
+      "finding": "Hierarchical retrieval failure",
+      "proves": "Hierarchy added no unique gold vs flat",
+      "implication": "Do not ship hierarchy as production candidate channel",
+      "justifies_architecture_change": false,
+      "anti_pattern": "hierarchy_as_default_channel"
+    },
+    {
+      "id": 5,
+      "finding": "HotpotQA BM25 baseline",
+      "proves": "High Any-Hit, moderate All-Found (~0.581@10)",
+      "implication": "Single-channel lexical incomplete for multi-evidence",
+      "justifies_architecture_change": true,
+      "scope": "experiment"
+    },
+    {
+      "id": 6,
+      "finding": "HotpotQA Dense complementarity",
+      "proves": "Dense recovers golds BM25 misses and vice versa",
+      "implication": "Union candidate generation justified",
+      "justifies_architecture_change": true,
+      "scope": "experiment"
+    },
+    {
+      "id": 7,
+      "finding": "HotpotQA union improvement",
+      "proves": "All-Found ~0.766 as candidate-set upper bound at source depth 10",
+      "implication": "Complementarity is real at CG layer; fair budget comparisons required",
+      "justifies_architecture_change": true,
+      "scope": "experiment"
+    },
+    {
+      "id": 8,
+      "finding": "HotpotQA CE coverage failures (920)",
+      "proves": "Independent CE Top-K loses required complementary evidence already in pool",
+      "implication": "Primary architecture gap is set-aware selection, not more retrieval",
+      "justifies_architecture_change": true,
+      "scope": "experiment_primary"
+    },
+    {
+      "id": 9,
+      "finding": "Bridge-heavy CE failures (93.7%)",
+      "proves": "Bridge/multi-hop questions disproportionately suffer",
+      "implication": "Set-aware selection should be evaluated with bridge breakdown",
+      "justifies_architecture_change": true
+    },
+    {
+      "id": 10,
+      "finding": "Missing golds often ranks 11-15",
+      "proves": "Near-miss under Top-10 budget; pool size ≤20",
+      "implication": "Selection policy change can recover many failures without new retrieval",
+      "justifies_architecture_change": true
+    }
+  ],
+  "recommended_next_milestone": {
+    "name": "set_aware_selection_over_frozen_hotpotqa_union_pool",
+    "summary": "Replace independent CE Top-10 truncation with coverage-aware selection on the frozen BM25@10 ∪ Dense@10 pool; measure All-Found@10 vs BM25, Dense, raw union, and independent CE.",
+    "addresses": "HotpotQA CE coverage failures (920) where pool is complete but Top-10 is not",
+    "constraints": [
+      "benchmark_only",
+      "no_production_changes",
+      "no_new_embedding_model",
+      "no_LLM_required_for_v1",
+      "no_new_retrieval_calls",
+      "reuse_frozen_pools_and_ce_scores_where_possible"
+    ],
+    "success_metrics": [
+      "All-Found@10",
+      "supporting_fact_recall@10",
+      "any_hit@10",
+      "gold_retention union→selected",
+      "bridge_vs_comparison breakdown",
+      "gold_set_size breakdown",
+      "mean selected size ≈ 10"
+    ],
+    "why_not_query_decomposition_first": "Measured bottleneck is selection under a complete pool, not missing candidates.",
+    "why_not_hierarchy": "Already measured no unique gold contribution.",
+    "why_not_full_StrategySelector": "Premature; prove set-aware selection first."
+  }
+}

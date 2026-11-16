@@ -88,11 +88,46 @@ def test_fallback_includes_original_and_no_guessed_answers():
 
 
 def test_rejects_generic_and_invented_rewrites():
-    assert is_safe_rewrite("What did Priya say that answers this question?", CHESS_Q) is False
-    assert is_safe_rewrite("Which stated facts about Priya are relevant?", CHESS_Q) is False
-    assert is_safe_rewrite("When did Priya go to the chess practice group oceanography?", CHESS_Q) is False
-    assert is_safe_rewrite("What career is Priya interested in?", CHESS_Q) is False
-    assert is_safe_rewrite("What date did Priya go to the chess practice group?", CHESS_Q) is True
+    # Pass similarity=1.0 so these checks exercise hard layers without MiniLM I/O.
+    assert is_safe_rewrite(
+        "What did Priya say that answers this question?", CHESS_Q, similarity=1.0
+    ) is False
+    assert is_safe_rewrite(
+        "Which stated facts about Priya are relevant?", CHESS_Q, similarity=1.0
+    ) is False
+    assert is_safe_rewrite(
+        "When did Priya go to the chess practice group oceanography?", CHESS_Q, similarity=1.0
+    ) is False
+    assert is_safe_rewrite(
+        "What career is Priya interested in?", CHESS_Q, similarity=1.0
+    ) is False
+    assert is_safe_rewrite(
+        "What date did Priya go to the chess practice group?", CHESS_Q, similarity=1.0
+    ) is True
+
+
+def test_accepts_attend_paraphrase_without_lexicon_gate():
+    original = "When did Caroline go to the LGBTQ support group?"
+    candidate = "What time did Caroline attend the LGBTQ support group?"
+    assert is_safe_rewrite(candidate, original, similarity=0.97) is True
+
+
+def test_rejects_entity_swap_and_compound_and_temporal_drift():
+    assert is_safe_rewrite(
+        "What was John's dad interested in?",
+        "What was Deborah's mom passionate about?",
+        similarity=1.0,
+    ) is False
+    assert is_safe_rewrite(
+        "Has Deborah tried surfing? When did Deborah try surfing for the first time?",
+        "Has Deborah tried surfing?",
+        similarity=1.0,
+    ) is False
+    assert is_safe_rewrite(
+        "What is the name of the board game John tried in October 2022?",
+        "What is the name of the board game John tried in September 2022?",
+        similarity=1.0,
+    ) is False
 
 
 def test_validate_plan_drops_rewrites_that_change_the_need():

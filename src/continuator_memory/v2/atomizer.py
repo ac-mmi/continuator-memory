@@ -1,4 +1,10 @@
-"""Semantic atomizer: one LLM call per context window, followed by deterministic validation."""
+"""LLM-backed window atomizer and Ollama JSON client.
+
+Product code should depend on ``continuator_memory.v2.extractors.MemoryExtractor``.
+``SemanticAtomizer`` is the JSON-completion implementation of that contract; pair it with
+``OllamaChatClient`` (default) or any other ``JSONCompletionClient``. Factories live in
+``extractors.build_extractor`` / ``default_atomizer`` / ``memory_atomizer``.
+"""
 
 from __future__ import annotations
 
@@ -25,6 +31,7 @@ from continuator_memory.v2.windowing import DEFAULT_CONTEXT_BEFORE, DEFAULT_TARG
 
 DEFAULT_ATOMIZER_MODEL = "qwen2.5:14b"
 DEFAULT_OLLAMA_HOST = "http://localhost:11434"
+DEFAULT_EXTRACTOR = "ollama"
 # Values used by the V2 extraction experiments (runs 15-21) with qwen2.5:14b.
 DEFAULT_NUM_CTX = 8192
 DEFAULT_NUM_PREDICT = 2048
@@ -61,6 +68,14 @@ class JSONCompletionClient(Protocol):
 
 @dataclass(frozen=True)
 class V2Settings:
+    """Runtime settings for V2 extraction.
+
+    ``extractor`` selects the backend implementation (``ollama``, ``passthrough``, …).
+    ``atomizer_model`` is the model id for that backend (e.g. an Ollama tag). They are
+    independent: swapping the model does not change the extractor type.
+    """
+
+    extractor: str = DEFAULT_EXTRACTOR
     atomizer_model: str = DEFAULT_ATOMIZER_MODEL
     ollama_host: str = DEFAULT_OLLAMA_HOST
     num_ctx: int = DEFAULT_NUM_CTX
@@ -73,6 +88,7 @@ class V2Settings:
     def from_env(cls) -> V2Settings:
         env = os.environ
         return cls(
+            extractor=env.get("CONTINUATOR_V2_EXTRACTOR", DEFAULT_EXTRACTOR),
             atomizer_model=env.get("CONTINUATOR_V2_ATOMIZER_MODEL", DEFAULT_ATOMIZER_MODEL),
             ollama_host=env.get("OLLAMA_HOST", DEFAULT_OLLAMA_HOST),
             num_ctx=int(env.get("CONTINUATOR_V2_NUM_CTX", DEFAULT_NUM_CTX)),
@@ -132,6 +148,12 @@ class AtomizationResult:
 
 
 class SemanticAtomizer:
+    """``MemoryExtractor`` backed by any ``JSONCompletionClient`` (Ollama by default).
+
+    Prompts and JSON schema come from ``ExtractionProtocol``; raw model text is always run
+    through ``validate_atomization`` before claims are returned.
+    """
+
     def __init__(self, client: JSONCompletionClient, protocol: ExtractionProtocol = ATOMIZATION_PROTOCOL):
         self.client = client
         self.protocol = protocol
@@ -154,12 +176,14 @@ class SemanticAtomizer:
 
 
 def default_atomizer(settings: V2Settings | None = None) -> SemanticAtomizer:
-    s = settings or V2Settings.from_env()
-    return SemanticAtomizer(OllamaChatClient(s.atomizer_model, s.ollama_host, s.num_ctx, s.num_predict))
+    """Ollama-backed atomization-v2 extractor (historical default; model from settings)."""
+    from continuator_memory.v2.extractors import EXTRACTOR_OLLAMA, build_extractor
+
+    return build_extractor(EXTRACTOR_OLLAMA, protocol=ATOMIZATION_PROTOCOL, settings=settings)  # type: ignore[return-value]
 
 
 def memory_atomizer(settings: V2Settings | None = None) -> SemanticAtomizer:
-    """V1 memory extraction with the same model client, windows, validation and consolidation."""
-    s = settings or V2Settings.from_env()
-    return SemanticAtomizer(OllamaChatClient(s.atomizer_model, s.ollama_host, s.num_ctx, s.num_predict),
-                            MEMORY_PROTOCOL)
+    """Ollama-backed memories-v1 extractor (model from settings)."""
+    from continuator_memory.v2.extractors import EXTRACTOR_OLLAMA, build_extractor
+
+    return build_extractor(EXTRACTOR_OLLAMA, protocol=MEMORY_PROTOCOL, settings=settings)  # type: ignore[return-value]

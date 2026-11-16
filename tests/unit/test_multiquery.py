@@ -9,9 +9,12 @@ from continuator_memory.v2.memory import MemorySource
 from continuator_memory.v2.memory_retrieval import RetrievalConfig, RetrievalResult
 from continuator_memory.webapi import multiquery
 from continuator_memory.webapi.multiquery import (
+    DEFAULT_PER_QUERY_K,
     RRF_ORIGINAL_WEIGHT_ENV,
     build_memory_retriever,
+    fused_ranked_message_ids,
     load_original_weight,
+    resolve_search_depth,
     retrieve_multiquery_evidence,
     rrf_fusion,
 )
@@ -126,6 +129,69 @@ def test_original_weight_does_not_protect_distractors_also_on_original():
 def test_load_original_weight_defaults_to_equal_rrf():
     assert load_original_weight({}) == 1.0
     assert load_original_weight({RRF_ORIGINAL_WEIGHT_ENV: "4"}) == 4.0
+
+
+def test_resolve_search_depth_defaults_and_cli_override():
+    assert resolve_search_depth(15, DEFAULT_PER_QUERY_K, None) == DEFAULT_PER_QUERY_K
+    assert resolve_search_depth(40, DEFAULT_PER_QUERY_K, None) == 40
+    assert resolve_search_depth(15, DEFAULT_PER_QUERY_K, 50) == 50
+    with pytest.raises(ValueError):
+        resolve_search_depth(15, DEFAULT_PER_QUERY_K, 0)
+
+
+def test_fused_ranked_message_ids_follow_fusion_order_not_original():
+    """Consensus paraphrases reorder fusion; message IDs must follow fused ranks."""
+    gold = _result(1, "gold", "m-gold")
+    original = (
+        gold,
+        _result(2, "keep", "m-keep"),
+        *(_result(index, f"o{index}", f"m-o{index}") for index in range(3, 8)),
+    )
+    fused = rrf_fusion([original, *_consensus_paraphrases()])
+    ranked = fused_ranked_message_ids(fused[:5])
+    assert ranked[0] != "m-gold"
+    assert "m-gold" not in ranked
+    assert ranked == [item.source_message_ids[0] for item in fused[:5]]
+
+
+def test_retrieve_multiquery_honors_depth_and_exposes_fused_ranked_ids():
+    workspace = Workspace.from_sample(embedder=HashingEmbedder(), k=3)
+    evidence, diagnostics = retrieve_multiquery_evidence(
+        "weekday bicycle",
+        workspace.conversation,
+        workspace.claims,
+        workspace.relations,
+        workspace.embedder(),
+        3,
+        workspace.budget_chars,
+        planner=None,
+        depth=7,
+    )
+    assert diagnostics["perQueryK"] == 7
+    expected: list[str] = []
+    for row in diagnostics["fusedRanking"]:
+        for mid in row["sourceMessageIds"]:
+            if mid not in expected:
+                expected.append(mid)
+    assert diagnostics["rankedMessageIds"] == expected
+    assert len(diagnostics["fusedRanking"]) <= 7
+    assert 1 <= evidence.n_seed_matches <= 3
+    assert evidence.question == "weekday bicycle"
+
+
+def test_retrieve_multiquery_default_depth_keeps_product_max_k_per_query_k():
+    workspace = Workspace.from_sample(embedder=HashingEmbedder(), k=3)
+    _, diagnostics = retrieve_multiquery_evidence(
+        "weekday bicycle",
+        workspace.conversation,
+        workspace.claims,
+        workspace.relations,
+        workspace.embedder(),
+        3,
+        workspace.budget_chars,
+        planner=None,
+    )
+    assert diagnostics["perQueryK"] == max(3, DEFAULT_PER_QUERY_K)
 
 
 def test_multiquery_keeps_original_and_compares_baseline():

@@ -1,8 +1,10 @@
-"""Lexical overlap for the experimental hybrid retrieval mode.
+"""Lexical overlap for the product ``lexical`` retrieval mode (alias: ``hybrid``).
 
-Baseline cosine ranking is unchanged. Hybrid adds
+Baseline cosine ranking is unchanged. Lexical mode adds
 ``score = similarity + adjustment + lexical_weight * overlap``.
 Overlap is the fraction of question content stems that appear in the memory.
+
+This is not ``v2.hybrid_retrieval.HybridRetriever`` (raw∪memory RRF).
 """
 
 from __future__ import annotations

@@ -1,0 +1,7 @@
+You: Our API access tokens expire after one hour. Also, my usual ferry is 7:40 to 6:10.
+
+ChatGPT: Got it — access tokens expire after one hour, and your usual ferry is 7:40 to 6:10.
+
+You: Prefer the morning sailing when weather is rough.
+
+ChatGPT: Understood. When the weather is rough, prefer the morning sailing.

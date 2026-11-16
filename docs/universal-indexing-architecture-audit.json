@@ -1,0 +1,263 @@
+{
+  "title": "Continuator universal indexing architecture audit",
+  "mode": "read_only",
+  "recommendation": "OPTION_D_hybrid_preserve_conversation_introduce_universal_evidence_layer",
+  "labels": ["MEASURED", "INFERRED", "ARCHITECTURAL_RECOMMENDATION", "NOT_VERIFIED"],
+  "productSpine": [
+    "src/continuator_memory/v2/",
+    "src/continuator_memory/webapi/",
+    "web/"
+  ],
+  "canonicalUnit": {
+    "product": "Memory",
+    "identity": "memory_id",
+    "provenance": "MemorySource.message_id (+ claim_id, position)",
+    "legacy": "Chunk",
+    "researchParallel": "knowledge PassageRow/Document",
+    "files": [
+      "src/continuator_memory/v2/memory.py",
+      "src/continuator_memory/v2/memory_store.py",
+      "src/continuator_memory/v2/memory_retrieval.py",
+      "src/continuator_memory/models.py",
+      "src/continuator_memory/knowledge/ingest.py"
+    ],
+    "label": "MEASURED"
+  },
+  "ingestionEntryPoints": [
+    {
+      "name": "workspace_import_text",
+      "file": "src/continuator_memory/webapi/workspace.py",
+      "function": "Workspace.import_text",
+      "accepts": "transcript/text/json conversation-like input",
+      "label": "MEASURED"
+    },
+    {
+      "name": "locomo_ingest",
+      "file": "src/continuator_memory/webapi/locomo.py",
+      "function": "ingest_locomo",
+      "accepts": "LoCoMo JSON",
+      "label": "MEASURED"
+    },
+    {
+      "name": "ingest_imported",
+      "file": "src/continuator_memory/webapi/extract.py",
+      "function": "ingest_imported",
+      "accepts": "Conversation",
+      "label": "MEASURED"
+    },
+    {
+      "name": "v2_pipeline",
+      "file": "src/continuator_memory/v2/pipeline.py",
+      "function": "V2IngestionPipeline.ingest",
+      "accepts": "Conversation",
+      "label": "MEASURED"
+    },
+    {
+      "name": "cli_v1_ingest",
+      "file": "src/continuator_memory/cli.py",
+      "accepts": "conversation JSON via Pipeline.ingest",
+      "label": "MEASURED"
+    },
+    {
+      "name": "knowledge_ingest",
+      "file": "src/continuator_memory/knowledge/ingest.py",
+      "function": "ingest_documents",
+      "accepts": "Conversation windows → LLM documents",
+      "label": "MEASURED"
+    }
+  ],
+  "ingestionStages": [
+    {
+      "stage": "parse",
+      "implementations": [
+        "webapi/transcript.py:parse_transcript",
+        "webapi/locomo.py:conversation_from_locomo",
+        "models.py:parse_conversation"
+      ],
+      "output": "Conversation/Message"
+    },
+    {
+      "stage": "segmentation_for_extraction",
+      "implementations": ["v2/windowing.py:build_windows"],
+      "defaults": {"targets_per_window": 4, "context_before": 4},
+      "output": "ContextWindow"
+    },
+    {
+      "stage": "extraction",
+      "implementations": [
+        "v2/extractors.py:PassThroughExtractor",
+        "v2/extractors.py:build_extractor/SemanticAtomizer"
+      ],
+      "output": "claims/relations"
+    },
+    {
+      "stage": "consolidation",
+      "implementations": ["v2/consolidation.py", "v2/memory_store.py:consolidate_stored"],
+      "output": "Memory/MemorySource/MemoryLink"
+    },
+    {
+      "stage": "optional_raw_chunks",
+      "implementations": ["chunking.py:chunk_conversation", "v2/pipeline.py:_raw_rows"],
+      "output": "Chunk + embeddings when embedder present"
+    },
+    {
+      "stage": "dense_index",
+      "implementations": ["v2/memory_retrieval.py:MemoryRetriever.index"],
+      "persistedVectorDbForV2Memories": false
+    },
+    {
+      "stage": "bm25_index",
+      "implementations": ["v2/bm25.py:BM25Index", "webapi/contextual_bm25.py"],
+      "ephemeral": true
+    }
+  ],
+  "chunkingMechanisms": [
+    {
+      "name": "message_window_v1",
+      "file": "src/continuator_memory/chunking.py",
+      "fixedSize": "message_count_window",
+      "structureAware": ["message_boundaries"],
+      "tokenFixed": false,
+      "defaults": {"window_size": 4, "overlap": 2},
+      "label": "MEASURED"
+    },
+    {
+      "name": "atomization_windows",
+      "file": "src/continuator_memory/v2/windowing.py",
+      "structureAware": ["message_boundaries"],
+      "defaults": {"targets_per_window": 4, "context_before": 4},
+      "label": "MEASURED"
+    },
+    {
+      "name": "knowledge_passage_packing",
+      "file": "src/continuator_memory/knowledge/ingest.py",
+      "approxTokenBudget": 180,
+      "label": "MEASURED"
+    },
+    {
+      "name": "contextual_prev_target_next",
+      "file": "src/continuator_memory/v2/contextual_units.py",
+      "persisted": false,
+      "neighbours": {"previous": 1, "next": 1, "same_session_only": true},
+      "label": "MEASURED"
+    }
+  ],
+  "relationships": [
+    {"name": "previous_next_message", "supported": "partial", "representation": "Message.position + neighbour_messages", "persistedEdge": false},
+    {"name": "same_conversation", "supported": true, "representation": "conversation_id", "persistedEdge": true},
+    {"name": "same_session", "supported": "partial", "representation": "equal Message.timestamp", "persistedEdge": false},
+    {"name": "memory_version_links", "supported": true, "representation": "MemoryLink/v2_memory_versions", "persistedEdge": true},
+    {"name": "document_section_hierarchy", "supported": false, "representation": null, "persistedEdge": false},
+    {"name": "prev_target_next_structure", "supported": false, "representation": "ephemeral retrieval text only", "persistedEdge": false}
+  ],
+  "representations": [
+    {"name": "message_content", "persisted": true, "usedBy": ["provenance", "display", "neighbours"]},
+    {"name": "memory_content", "persisted": true, "usedBy": ["dense_embedding_default"]},
+    {"name": "contextual_retrieval_text", "persisted": false, "usedBy": ["contextual_bm25", "ce_passages", "contextual_lexical"]},
+    {"name": "v1_chunk_text", "persisted": true, "usedBy": ["legacy_retrieve"]},
+    {"name": "knowledge_passage_embedded", "persisted": true, "usedBy": ["knowledge_path"]}
+  ],
+  "indexing": {
+    "dense": {
+      "embedder": "embedding.py:SentenceTransformerEmbedder",
+      "index": "v2/memory_retrieval.py:MemoryRetriever",
+      "durableV2VectorTable": false,
+      "label": "MEASURED"
+    },
+    "lexicalOverlapHybrid": {
+      "file": "v2/lexical.py",
+      "note": "not BM25; dense + stem overlap bonus",
+      "label": "MEASURED"
+    },
+    "bm25": {
+      "file": "v2/bm25.py",
+      "unit": "RetrievalUnit",
+      "ephemeral": true,
+      "label": "MEASURED"
+    },
+    "graphExperimental": {
+      "file": "v2/graph_index.py",
+      "label": "MEASURED"
+    }
+  },
+  "provenance": {
+    "messageLevel": true,
+    "multiSourceMemories": true,
+    "pageOffsetSpan": false,
+    "codePathLine": false,
+    "sufficientForUniversalDocuments": false,
+    "label": "MEASURED"
+  },
+  "sourceAdaptersPresent": {
+    "conversation_transcript": true,
+    "locomo_json": true,
+    "conversation_json": true,
+    "markdown": false,
+    "html": false,
+    "pdf": false,
+    "code_repository": false,
+    "label": "MEASURED"
+  },
+  "gapAnalysis": [
+    {"capability": "source_specific_adapters", "state": "conversation_only", "priority": "P0", "evolution": "C"},
+    {"capability": "canonical_document_model", "state": "Conversation_only", "priority": "P0", "evolution": "C_or_D_if_forced_into_Message"},
+    {"capability": "canonical_evidence_unit", "state": "Memory_claim_derived", "priority": "P0", "evolution": "B"},
+    {"capability": "structure_aware_segmentation", "state": "message_windows_only", "priority": "P0", "evolution": "C"},
+    {"capability": "hierarchical_relationships", "state": "version_links_only", "priority": "P1", "evolution": "C"},
+    {"capability": "stable_evidence_identity", "state": "memory_id_yes", "priority": "P1", "evolution": "A"},
+    {"capability": "full_provenance", "state": "message_level_only", "priority": "P0", "evolution": "C"},
+    {"capability": "multiple_representations", "state": "partial_ephemeral", "priority": "P1", "evolution": "B"},
+    {"capability": "dense_indexing", "state": "in_memory_yes", "priority": "P2", "evolution": "A"},
+    {"capability": "lexical_indexing", "state": "overlap_plus_bm25", "priority": "P2", "evolution": "A"},
+    {"capability": "metadata_indexing", "state": "minimal", "priority": "P2", "evolution": "C"},
+    {"capability": "context_expansion", "state": "partial", "priority": "P1", "evolution": "B"},
+    {"capability": "incremental_reindexing", "state": "partial", "priority": "P1", "evolution": "B"},
+    {"capability": "source_updates_deletions", "state": "conversation_replace", "priority": "P1", "evolution": "C"},
+    {"capability": "reproducible_versioning", "state": "partial", "priority": "P2", "evolution": "C"}
+  ],
+  "evolutionClasses": {
+    "A_reuse": [
+      "conversation_adapters",
+      "Memory_MemorySource",
+      "MemoryRetriever_interface",
+      "BM25_RetrievalUnit",
+      "CE_reorder_only"
+    ],
+    "B_extend": [
+      "ephemeral_contextual_views",
+      "claim_extraction_for_chats",
+      "multi_channel_candidate_generation"
+    ],
+    "C_add_incremental": [
+      "pdf_md_html_code_adapters",
+      "Document_EvidenceUnit_tables",
+      "span_provenance_fields",
+      "hierarchy_edges"
+    ],
+    "D_blockers": [
+      {
+        "item": "force_all_corpora_through_Message_Conversation_only",
+        "why": "Loses native document/code structure and span locations; overloads role/timestamp semantics"
+      }
+    ]
+  },
+  "directAnswers": {
+    "what_is_indexed_today": "V2 Memories (primary), optional ephemeral contextual BM25 units, legacy Chunks, parallel knowledge passages",
+    "current_evidence_unit": "Memory with MemorySource provenance to message_id",
+    "suitable_for_universal_product": "Partially; strong for conversations, insufficient for docs/code without new model",
+    "biggest_limitation": "Conversation/Message is the only first-class source ontology in the product spine",
+    "universal_without_ingestion_change": false,
+    "change_first": "Parallel canonical evidence/document model + first non-conversation adapter; keep conversation pipeline",
+    "do_not_throw_away": [
+      "Memory/MemorySource/consolidation",
+      "MemoryRetriever and RetrievalUnit interfaces",
+      "multi-channel CG + CE reorder patterns",
+      "SQLite conversation/claim stores",
+      "full source_message_ids credit discipline"
+    ]
+  },
+  "decision": {
+    "option": "D",
+    "statement": "Preserve existing conversation pipeline while introducing a new universal canonical ingestion/evidence layer alongside it."
+  }
+}

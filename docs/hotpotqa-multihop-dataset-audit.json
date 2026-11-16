@@ -1,0 +1,190 @@
+{
+  "experiment": "hotpotqa_multihop_dataset_audit",
+  "audit_only": true,
+  "dataset_path": "benchmarks/evidence_retrieval/external/hotpotqa/hotpot_dev_distractor_v1.json",
+  "setting": "distractor_dev_v1",
+  "statistics": {
+    "total_examples": 7405,
+    "type_counts": {
+      "bridge": 5918,
+      "comparison": 1487
+    },
+    "level_counts": {
+      "hard": 7405
+    },
+    "answer_kinds": {
+      "yes_no": 458,
+      "span_or_text": 6947
+    },
+    "supporting_facts_count_distribution": {
+      "2": 4990,
+      "3": 1774,
+      "4": 537,
+      "5": 80,
+      "6": 14,
+      "7": 9,
+      "8": 1
+    },
+    "supporting_documents_count_distribution": {
+      "2": 7405
+    },
+    "examples_with_supporting_evidence_across_2plus_documents": 7405,
+    "examples_with_only_1_supporting_document": 0,
+    "examples_with_multiple_supporting_sentences_in_same_document": 2415,
+    "context_document_count_distribution": {
+      "2": 21,
+      "3": 7,
+      "4": 9,
+      "5": 6,
+      "6": 8,
+      "7": 2,
+      "8": 4,
+      "9": 3,
+      "10": 7345
+    },
+    "duplicate_titles_within_context": 0,
+    "supporting_fact_title_missing_from_context": 0,
+    "supporting_fact_sentence_index_out_of_range": 1,
+    "supporting_fact_oob_example_id": "5ae61bfd5542992663a4f261",
+    "bridge_first_two_supporting_facts_same_document": 1504,
+    "bridge_first_and_last_supporting_fact_different_document": 5918,
+    "sentences_per_context_paragraph_top": {
+      "1": 5115,
+      "2": 12708,
+      "3": 16037,
+      "4": 14164,
+      "5": 9979,
+      "6": 6347,
+      "7": 3695,
+      "8": 2148,
+      "9": 1235,
+      "10": 773
+    }
+  },
+  "schema": {
+    "top_level_fields": [
+      "_id",
+      "answer",
+      "context",
+      "level",
+      "question",
+      "supporting_facts",
+      "type"
+    ],
+    "context_item": "[title: str, sentences: list[str]]",
+    "supporting_fact_item": "[title: str, sentence_index: int]",
+    "answer": "string (yes/no or short text span)",
+    "type_values": ["bridge", "comparison"],
+    "level_values_observed": ["hard"]
+  },
+  "supporting_fact_mapping": {
+    "document_key": "context title (Wikipedia-style article/paragraph title)",
+    "paragraph": "the sentence list under that title in context",
+    "evidence_unit": "one sentence at sentence_index within that list",
+    "identity_tuple": "(title, sentence_index)",
+    "identity_sufficient_within_example": true,
+    "identity_notes": [
+      "Within a question's distractor context, titles are unique (0 duplicate titles observed).",
+      "sentence_index is 0-based into the title's sentence list.",
+      "1 supporting_fact has out-of-range index (must be handled as gold-resolution error).",
+      "Titles are stable enough for Document identity within the distractor setting; not a global Wikipedia dump ID."
+    ]
+  },
+  "multi_hop_structure": {
+    "explicitly_provided": [
+      "question",
+      "answer",
+      "type (bridge|comparison)",
+      "supporting_facts as unordered-with-respect-to-hops list of (title, sentence_index)",
+      "closed distractor context of paragraph titles + sentence lists"
+    ],
+    "must_not_infer": [
+      "supporting_facts order == Hop-1 → Hop-2 reasoning order",
+      "comparison questions are ordered multi-hop chains",
+      "every multi-sentence supporting set is an ordered path"
+    ],
+    "bridge_intent": "multi-document compositional QA (5918/7405)",
+    "comparison_intent": "parallel attribute comparison across entities (1487/7405), not an ordered hop chain"
+  },
+  "metrics": {
+    "A_supporting_fact_recall_at_k": {
+      "status": "SUPPORTED",
+      "reason": "Exact gold (title, sentence_index) set is present; recall = |retrieved ∩ gold| / |gold|."
+    },
+    "B_all_supporting_facts_found_at_k": {
+      "status": "SUPPORTED",
+      "reason": "Same gold set; indicator that coverage@K == 1.0."
+    },
+    "C_at_least_one_supporting_fact_found_at_k": {
+      "status": "SUPPORTED",
+      "reason": "Hit@K over any gold supporting-fact identity."
+    },
+    "D_document_recall_at_k": {
+      "status": "SUPPORTED",
+      "reason": "Supporting document titles are exact; every example has exactly 2 supporting titles."
+    },
+    "E_ordered_hop1_to_hop2_success": {
+      "status": "NOT_SUPPORTED",
+      "reason": "No hop-order field. supporting_facts order is not guaranteed reasoning order; comparison is parallel; 1504/5918 bridge examples begin with two facts from the same document."
+    }
+  },
+  "distractor_setting": {
+    "description": "Each question ships a closed context list of Wikipedia paragraphs: typically 2 gold + 8 distractors (10 total).",
+    "retrieval_scope": "question_specific_context_set",
+    "not_global_corpus": true,
+    "comparable_to_scifact_global_retrieval": false,
+    "comparable_to_scifact_notes": "SciFact experiments retrieve over a shared abstract corpus. HotpotQA distractor retrieval is over a per-question 2–10 paragraph pool. Results are not directly comparable as global-corpus Hit@K."
+  },
+  "architecture_fit": {
+    "recommended_representation": {
+      "Document": "one context title (source_uri e.g. hotpotqa://{_id}/{title})",
+      "EvidenceUnit": "one sentence in that title's sentence list",
+      "gold": "(document_key=title, sentence_index) → evidence_id"
+    },
+    "schema_changes_required_now": false,
+    "notes": "Fits existing Document + EvidenceUnit persistence without new tables. CanonicalSection optional later; not required for sentence-level gold."
+  },
+  "representative_examples": {
+    "two_document_bridge": {
+      "_id": "5a8c7595554299585d9e36b6",
+      "type": "bridge",
+      "question": "What government position was held by the woman who portrayed Corliss Archer in the film Kiss and Tell?",
+      "answer": "Chief of Protocol",
+      "supporting_facts": [
+        ["Kiss and Tell (1945 film)", 0],
+        ["Shirley Temple", 0],
+        ["Shirley Temple", 1]
+      ]
+    },
+    "multiple_supporting_sentences_one_document": {
+      "_id": "5a8c7595554299585d9e36b6",
+      "note": "Shirley Temple contributes sentence indices 0 and 1"
+    },
+    "supporting_facts_do_not_reveal_ordered_hop_chain": {
+      "_id": "5a8b57f25542995d1e6f1371",
+      "type": "comparison",
+      "question": "Were Scott Derrickson and Ed Wood of the same nationality?",
+      "answer": "yes",
+      "supporting_facts": [
+        ["Scott Derrickson", 0],
+        ["Ed Wood", 0]
+      ],
+      "note": "Parallel nationality facts; not Hop-1 then Hop-2."
+    },
+    "bridge_with_non_alternating_document_order": {
+      "_id": "5a85ea095542994775f606a8",
+      "type": "bridge",
+      "supporting_facts_prefix": "three facts from The Hork-Bajir Chronicles before Animorphs facts",
+      "note": "Even for bridge, SF list order is annotation order, not a guaranteed hop sequence."
+    }
+  },
+  "verdict": {
+    "code": "B",
+    "label": "Suitable only for multi-evidence-set retrieval, not ordered multi-hop retrieval",
+    "rationale": "HotpotQA distractor provides exact multi-document supporting-fact golds in a closed context pool (excellent for supporting-fact / document coverage metrics). It does not provide ordered hop-chain labels. Do not evaluate ordered Hop-1→Hop-2 success from supporting_facts order."
+  },
+  "recommended_next_step": {
+    "id": "hotpotqa_distractor_adapter_and_coverage_metrics",
+    "summary": "Implement a read-only HotpotQA distractor → Document + sentence EvidenceUnit materializer and gold resolver, plus metrics A–D (supporting-fact Recall@K, all-found@K, any-found@K, Document Recall@K) on the per-question context pool — no embeddings, no production changes, no ordered-hop metric."
+  }
+}

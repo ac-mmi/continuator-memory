@@ -1,7 +1,7 @@
 from continuator_memory.models import parse_conversation
 from continuator_memory.v2.consolidation import Consolidator
 from continuator_memory.v2.memory import STATUS_CURRENT, STATUS_SUPERSEDED, UPDATE
-from continuator_memory.v2.memory_store import MemoryStore, consolidate_stored
+from continuator_memory.v2.memory_store import MemoryStore, consolidate_stored, resolve_consolidator
 from tests.unit.test_v2_pipeline import CONVERSATION, pipeline
 
 
@@ -9,6 +9,18 @@ def _ingest(store):
     p, _ = pipeline(store)
     p.ingest(parse_conversation(CONVERSATION))
     return p
+
+
+def test_ingest_persists_consolidated_memories(store):
+    _ingest(store)
+    ms = MemoryStore(store.connection)
+    assert ms.has_snapshot("trip")
+    by_claim = {m.claim_id: m for m in ms.get_memories("trip")}
+    assert by_claim["m1:c2"].status == STATUS_SUPERSEDED and by_claim["m1:c2"].superseded_by == "mem:m4:c1"
+    assert by_claim["m4:c1"].status == STATUS_CURRENT
+    loaded = ms.load_consolidator("trip")
+    assert loaded is not None
+    assert [m.to_dict() for m in loaded._ordered()] == [m.to_dict() for m in ms.get_memories("trip")]
 
 
 def test_consolidate_stored_claims_and_round_trip(store):
@@ -26,6 +38,21 @@ def test_consolidate_stored_claims_and_round_trip(store):
     assert [d.to_dict() for d in decisions] == [d.to_dict() for d in c.decisions]
     assert next(d for d in decisions if d.claim_id == "m4:c1").action == UPDATE
     assert "Leah lives in Madrid." not in [m.content for m in ms.get_memories("trip", current_only=True)]
+
+
+def test_resolve_consolidator_prefers_persisted_snapshot(store):
+    _ingest(store)
+    first = resolve_consolidator(store.connection, "trip", persist_if_missing=False)
+    assert first.memories
+    # Wipe only the snapshot; claims remain. Without persist_if_missing, rebuild in RAM.
+    MemoryStore(store.connection).delete_conversation("trip")
+    rebuilt = resolve_consolidator(store.connection, "trip", persist_if_missing=False)
+    assert [m.to_dict() for m in rebuilt._ordered()] == [m.to_dict() for m in first._ordered()]
+    assert not MemoryStore(store.connection).has_snapshot("trip")
+    # Prefer re-persisting for product loads of older DBs.
+    resolved = resolve_consolidator(store.connection, "trip", persist_if_missing=True)
+    assert MemoryStore(store.connection).has_snapshot("trip")
+    assert [m.to_dict() for m in resolved._ordered()] == [m.to_dict() for m in first._ordered()]
 
 
 def test_superseded_memory_source_stays_queryable_and_traces_to_raw_message(store):
