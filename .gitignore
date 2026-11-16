@@ -6,7 +6,8 @@ __pycache__/
 .ruff_cache/
 build/
 dist/
-data/
+# Root product/runtime SQLite directory only — do not ignore web/src/data/.
+/data/
 *.db
 .env
 .DS_Store
